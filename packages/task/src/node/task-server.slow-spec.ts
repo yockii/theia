@@ -1,5 +1,5 @@
 /********************************************************************************
- * Copyright (C) 2017 Ericsson and others.
+ * Copyright (C) 2017-2019 Ericsson and others.
  *
  * This program and the accompanying materials are made available under the
  * terms of the Eclipse Public License v. 2.0 which is available at
@@ -21,11 +21,11 @@ import { ProcessType, ProcessTaskConfiguration } from '../common/process/task-pr
 import * as http from 'http';
 import * as https from 'https';
 import { isWindows } from '@theia/core/lib/common/os';
-import URI from '@theia/core/lib/common/uri';
 import { FileUri } from '@theia/core/lib/node';
 import { terminalsPath } from '@theia/terminal/lib/common/terminal-protocol';
 import { expectThrowsAsync } from '@theia/core/lib/common/test/expect';
 import { TestWebSocketChannel } from '@theia/core/lib/node/messaging/test/test-web-socket-channel';
+import { expect } from 'chai';
 
 /**
  * Globals
@@ -45,7 +45,7 @@ const commandToFindInPathWindows = 'dir';
 
 // we use test-resources subfolder ('<theia>/packages/task/test-resources/'),
 // as workspace root, for these tests
-const wsRoot: string = FileUri.fsPath(new URI(__dirname).resolve('../../test-resources'));
+const wsRoot: string = FileUri.fsPath(FileUri.create(__dirname).resolve('../../test-resources'));
 
 describe('Task server / back-end', function () {
     this.timeout(10000);
@@ -124,6 +124,16 @@ describe('Task server / back-end', function () {
         await p;
     });
 
+    it('task is executed successfully with cwd as a file URI', async function () {
+        const command = isWindows ? commandShortrunningindows : commandShortRunning;
+        const config = createProcessTaskConfig('shell', FileUri.fsPath(command), [], FileUri.create(wsRoot).toString());
+        const taskInfo: TaskInfo = await taskServer.run(config, wsRoot);
+
+        const p = checkSuccessfullProcessExit(taskInfo, taskWatcher);
+
+        await p;
+    });
+
     it('task is executed successfully using terminal process', async function () {
         const command = isWindows ? commandShortrunningindows : commandShortRunning;
         const taskInfo: TaskInfo = await taskServer.run(createProcessTaskConfig('shell', FileUri.fsPath(command), []), wsRoot);
@@ -178,36 +188,56 @@ describe('Task server / back-end', function () {
         // const command = isWindows ? command_absolute_path_long_running_windows : command_absolute_path_long_running;
         const taskInfo: TaskInfo = await taskServer.run(createTaskConfigTaskLongRunning('shell'), wsRoot);
 
-        const p = new Promise((resolve, reject) => {
-            const toDispose = taskWatcher.onTaskExit((event: TaskExitedEvent) => {
-                if (event.taskId === taskInfo.taskId && event.code === 0 && event.signal !== '0') {
-                    toDispose.dispose();
-                    resolve();
+        const p = new Promise<string | number>((resolve, reject) => {
+            taskWatcher.onTaskExit((event: TaskExitedEvent) => {
+                if (isWindows) {
+                    if (event.taskId !== taskInfo.taskId || event.code === undefined) {
+                        reject();
+                    }
+                    resolve(event.code);
+                } else {
+                    if (event.taskId !== taskInfo.taskId || event.signal === undefined) {
+                        reject();
+                    }
+                    resolve(event.signal);
                 }
             });
+
+            taskServer.kill(taskInfo.taskId);
         });
 
-        await taskServer.kill(taskInfo.taskId);
-
-        await p;
+        // node-pty reports different things on Linux/macOS vs Windows when
+        // killing a process.  This is not ideal, but that's how things are
+        // currently.  Ideally, its behavior should be aligned as much as
+        // possible on what node's child_process module does.
+        const signalOrCode = await p;
+        if (isWindows) {
+            // On Windows, node-pty just reports an exit code of 0.
+            expect(signalOrCode).equals(0);
+        } else {
+            // On Linux/macOS, node-pty sends SIGHUP by default, for some reason.
+            expect(signalOrCode).equals('SIGHUP');
+        }
     });
 
     it('task using raw process can be killed', async function () {
         // const command = isWindows ? command_absolute_path_long_running_windows : command_absolute_path_long_running;
         const taskInfo: TaskInfo = await taskServer.run(createTaskConfigTaskLongRunning('process'), wsRoot);
 
-        const p = new Promise((resolve, reject) => {
-            const toDispose = taskWatcher.onTaskExit((event: TaskExitedEvent) => {
-                if (event.taskId === taskInfo.taskId && event.code === null && event.signal === 'SIGTERM') {
-                    toDispose.dispose();
-                    resolve();
+        const p = new Promise<string>((resolve, reject) => {
+            taskWatcher.onTaskExit((event: TaskExitedEvent) => {
+                if (event.taskId !== taskInfo.taskId || event.signal === undefined) {
+                    reject();
                 }
+
+                resolve(event.signal);
             });
+
+            taskServer.kill(taskInfo.taskId);
         });
 
-        await taskServer.kill(taskInfo.taskId);
-
-        await p;
+        const signal = await p;
+        expect(signal).equals('SIGTERM');
     });
 
     it('task using terminal process can handle command that does not exist', async function () {
@@ -323,7 +353,7 @@ function createTaskConfig(taskType: string, command: string, args: string[]): Ta
     return options;
 }
 
-function createProcessTaskConfig(processType: ProcessType, command: string, args: string[]): TaskConfiguration {
+function createProcessTaskConfig(processType: ProcessType, command: string, args: string[], cwd: string = wsRoot): TaskConfiguration {
     const options: ProcessTaskConfiguration = {
         label: 'test task',
         type: processType,
@@ -338,7 +368,7 @@ function createProcessTaskConfig(processType: ProcessType, command: string, args
                 (args[0] !== undefined) ? args[0] : ''
             ]
         },
-        cwd: wsRoot
+        cwd: cwd
     };
     return options;
 }

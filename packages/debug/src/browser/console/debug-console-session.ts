@@ -33,6 +33,9 @@ export class DebugConsoleSession extends ConsoleSession {
     readonly id = 'debug';
     protected items: ConsoleItem[] = [];
 
+    // content buffer for [append](#append) method
+    protected uncompletedItemContent: string | undefined;
+
     @inject(DebugSessionManager)
     protected readonly manager: DebugSessionManager;
 
@@ -79,7 +82,7 @@ export class DebugConsoleSession extends ConsoleSession {
     }
 
     getElements(): IterableIterator<ConsoleItem> {
-        return this.items.values();
+        return this.items[Symbol.iterator]();
     }
 
     protected async completions({ textDocument: { uri }, position }: CompletionParams): Promise<CompletionItem[]> {
@@ -122,6 +125,28 @@ export class DebugConsoleSession extends ConsoleSession {
 
     clear(): void {
         this.items = [];
+        this.fireDidChange();
+    }
+
+    append(value: string): void {
+        if (!value) {
+            return;
+        }
+
+        const lastItem = this.items.slice(-1)[0];
+        if (lastItem instanceof AnsiConsoleItem && lastItem.content === this.uncompletedItemContent) {
+            this.items.pop();
+            this.uncompletedItemContent += value;
+        } else {
+            this.uncompletedItemContent = value;
+        }
+
+        this.items.push(new AnsiConsoleItem(this.uncompletedItemContent, MessageType.Info));
+        this.fireDidChange();
+    }
+
+    appendLine(value: string): void {
+        this.items.push(new AnsiConsoleItem(value, MessageType.Info));
         this.fireDidChange();
     }
 

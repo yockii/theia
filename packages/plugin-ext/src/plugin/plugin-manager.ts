@@ -14,7 +14,16 @@
  * SPDX-License-Identifier: EPL-2.0 OR GPL-2.0 WITH Classpath-exception-2.0
  ********************************************************************************/
 
-import { PluginManagerExt, PluginInitData, PluginManager, Plugin, PluginAPI } from '../api/plugin-api';
+import {
+    PLUGIN_RPC_CONTEXT,
+    MAIN_RPC_CONTEXT,
+    PluginManagerExt,
+    PluginInitData,
+    PluginManager,
+    Plugin,
+    PluginAPI,
+    ConfigStorage
+} from '../api/plugin-api';
 import { PluginMetadata } from '../common/plugin-protocol';
 import * as theia from '@theia/plugin';
 import { join } from 'path';
@@ -22,7 +31,9 @@ import { dispose } from '../common/disposable-util';
 import { Deferred } from '@theia/core/lib/common/promise-util';
 import { EnvExtImpl } from './env';
 import { PreferenceRegistryExtImpl } from './preference-registry';
+import { Memento, KeyValueStorageProxy } from './plugin-storage';
 import { ExtPluginApi } from '../common/plugin-ext-api-contribution';
+import { RPCProtocol } from '../api/rpc-protocol';
 
 export interface PluginHost {
 
@@ -50,11 +61,15 @@ export class PluginManagerExtImpl implements PluginManagerExt, PluginManager {
     private registry = new Map<string, Plugin>();
     private activatedPlugins = new Map<string, ActivatedPlugin>();
     private pluginActivationPromises = new Map<string, Deferred<void>>();
+    private pluginContextsMap: Map<string, theia.PluginContext> = new Map();
+    private storageProxy: KeyValueStorageProxy;
 
-    constructor(private readonly host: PluginHost,
+    constructor(
+        private readonly host: PluginHost,
         private readonly envExt: EnvExtImpl,
-        private readonly preferencesManager: PreferenceRegistryExtImpl) {
-    }
+        private readonly preferencesManager: PreferenceRegistryExtImpl,
+        private readonly rpc: RPCProtocol
+    ) { }
 
     $stopPlugin(contextPath: string): PromiseLike<void> {
         this.activatedPlugins.forEach(plugin => {
@@ -71,7 +86,14 @@ export class PluginManagerExtImpl implements PluginManagerExt, PluginManager {
         return Promise.resolve();
     }
 
-    $init(pluginInit: PluginInitData): PromiseLike<void> {
+    $init(pluginInit: PluginInitData, configStorage: ConfigStorage): PromiseLike<void> {
+        this.storageProxy = this.rpc.set(
+            MAIN_RPC_CONTEXT.STORAGE_EXT,
+            new KeyValueStorageProxy(this.rpc.getProxy(PLUGIN_RPC_CONTEXT.STORAGE_MAIN),
+                                     pluginInit.globalState,
+                                     pluginInit.workspaceState)
+        );
+
         // init query parameters
         this.envExt.setQueryParameters(pluginInit.env.queryParams);
 
@@ -90,12 +112,13 @@ export class PluginManagerExtImpl implements PluginManagerExt, PluginManager {
         for (const plugin of plugins) {
             this.registry.set(plugin.model.id, plugin);
         }
+
         // run plugins
         for (const plugin of plugins) {
             const pluginMain = this.host.loadPlugin(plugin);
             // able to load the plug-in ?
             if (pluginMain !== undefined) {
-                this.startPlugin(plugin, pluginMain);
+                this.startPlugin(plugin, configStorage, pluginMain);
             } else {
                 return Promise.reject(new Error('Unable to load the given plugin'));
             }
@@ -104,17 +127,29 @@ export class PluginManagerExtImpl implements PluginManagerExt, PluginManager {
         return Promise.resolve();
     }
 
-    // tslint:disable-next-line:no-any
-    private startPlugin(plugin: Plugin, pluginMain: any): void {
+    $updateStoragePath(path: string | undefined): PromiseLike<void> {
+        this.pluginContextsMap.forEach((pluginContext: theia.PluginContext, pluginId: string) => {
+            pluginContext.storagePath = path ? join(path, pluginId) : undefined;
+        });
+        return Promise.resolve();
+    }
 
-        // Create pluginContext object for this plugin.
+    // tslint:disable-next-line:no-any
+    private startPlugin(plugin: Plugin, configStorage: ConfigStorage, pluginMain: any): void {
         const subscriptions: theia.Disposable[] = [];
         const asAbsolutePath = (relativePath: string): string => join(plugin.pluginFolder, relativePath);
+        const logPath = join(configStorage.hostLogPath, plugin.model.id); // todo check format
+        const storagePath = join(configStorage.hostStoragePath, plugin.model.id);
         const pluginContext: theia.PluginContext = {
             extensionPath: plugin.pluginFolder,
+            globalState: new Memento(plugin.model.id, true, this.storageProxy),
+            workspaceState: new Memento(plugin.model.id, false, this.storageProxy),
             subscriptions: subscriptions,
-            asAbsolutePath: asAbsolutePath
+            asAbsolutePath: asAbsolutePath,
+            logPath: logPath,
+            storagePath: storagePath,
         };
+        this.pluginContextsMap.set(plugin.model.id, pluginContext);
 
         let stopFn = undefined;
         if (typeof pluginMain[plugin.lifecycle.stopMethod] === 'function') {

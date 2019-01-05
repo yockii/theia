@@ -13,3 +13,12 @@
  *
  * SPDX-License-Identifier: EPL-2.0 OR GPL-2.0 WITH Classpath-exception-2.0
  ********************************************************************************/
+
+import { ContainerModule } from 'inversify';
+import { CommandContribution } from '@theia/core';
+import { PluginVscodeCommandsContribution } from './plugin-vscode-commands-contribution';
+
+export default new ContainerModule(bind => {
+    bind(PluginVscodeCommandsContribution).toSelf().inSingletonScope();
+    bind(CommandContribution).toDynamicValue(context => context.container.get(PluginVscodeCommandsContribution));
+});

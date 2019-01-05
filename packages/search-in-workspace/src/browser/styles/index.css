@@ -380,6 +380,9 @@
 .result-node-buttons .replace-result {
     background-image: var(--theia-icon-replace);
 }
+.result-node-buttons .replace-all-result {
+    background-image: var(--theia-icon-replace-all);
+}
 
 .replace-all-button.disabled {
     opacity: 0.5;
@@ -387,4 +390,14 @@
 
 .search-in-workspace-tab-icon::before {
     content: "\f002"
+}
+
+.highlighted-count-container {
+    background-color: var(--theia-brand-color0);
+    color: #ffffff;
+}
+
+.t-siw-search-container .searchHeader .search-info {
+    color: var(--theia-ui-font-color2);
+    margin-left: 17px;
 }

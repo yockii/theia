@@ -23,11 +23,12 @@ import { Message, isRequestMessage } from 'vscode-ws-jsonrpc';
 import { InitializeParams, InitializeRequest } from 'vscode-languageserver-protocol';
 import { createSocketConnection } from 'vscode-ws-jsonrpc/lib/server';
 import { DEBUG_MODE } from '@theia/core/lib/node';
-import { IConnection, BaseLanguageServerContribution } from '@theia/languages/lib/node';
-import { JAVA_LANGUAGE_ID, JAVA_LANGUAGE_NAME } from '../common';
+import { IConnection, BaseLanguageServerContribution, LanguageServerStartOptions } from '@theia/languages/lib/node';
+import { JAVA_LANGUAGE_ID, JAVA_LANGUAGE_NAME, JavaStartParams } from '../common';
 import { JavaCliContribution } from './java-cli-contribution';
 import { ContributionProvider } from '@theia/core';
 import { JavaExtensionContribution } from './java-extension-model';
+const sha1 = require('sha1');
 
 export type ConfigurationType = 'config_win' | 'config_mac' | 'config_linux';
 export const configurations = new Map<typeof process.platform, ConfigurationType>();
@@ -35,12 +36,19 @@ configurations.set('darwin', 'config_mac');
 configurations.set('win32', 'config_win');
 configurations.set('linux', 'config_linux');
 
+export interface JavaStartOptions extends LanguageServerStartOptions {
+    parameters?: JavaStartParams
+}
+
 @injectable()
 export class JavaContribution extends BaseLanguageServerContribution {
 
-    private javaBundles: string[] | undefined;
     readonly id = JAVA_LANGUAGE_ID;
     readonly name = JAVA_LANGUAGE_NAME;
+
+    private activeDataFolders: Set<string>;
+    private javaBundles: string[] = [];
+    protected readonly ready: Promise<void>;
 
     constructor(
         @inject(JavaCliContribution) protected readonly cli: JavaCliContribution,
@@ -48,13 +56,23 @@ export class JavaContribution extends BaseLanguageServerContribution {
         protected readonly contributions: ContributionProvider<JavaExtensionContribution>
     ) {
         super();
-        this.javaBundles = [];
+        this.activeDataFolders = new Set<string>();
+        this.ready = this.collectExtensionBundles();
+    }
+
+    protected async collectExtensionBundles(): Promise<void> {
         for (const contrib of this.contributions.getContributions()) {
-            this.javaBundles = this.javaBundles.concat(contrib.getExtensionBundles());
+            try {
+                const javaBundles = await contrib.getExtensionBundles();
+                this.javaBundles = this.javaBundles.concat(javaBundles);
+            } catch (e) {
+                console.error(e);
+            }
         }
     }
 
-    start(clientConnection: IConnection): void {
+    async start(clientConnection: IConnection, { parameters }: JavaStartOptions): Promise<void> {
+        await this.ready;
 
         const socketPort = this.cli.lsPort();
         if (socketPort) {
@@ -70,9 +88,20 @@ export class JavaContribution extends BaseLanguageServerContribution {
         if (jarPaths.length === 0) {
             throw new Error('The Java server launcher is not found.');
         }
-
         const jarPath = path.resolve(serverPath, jarPaths[0]);
-        const workspacePath = path.resolve(os.tmpdir(), '_ws_' + new Date().getTime());
+
+        let workspaceUri: string;
+        if (!parameters || !parameters.workspace) {
+            workspaceUri = 'default';
+        } else {
+            workspaceUri = parameters.workspace;
+        }
+
+        const dataFolderSuffix = this.generateDataFolderSuffix(workspaceUri);
+        this.activeDataFolders.add(dataFolderSuffix);
+        clientConnection.onClose(() => this.activeDataFolders.delete(dataFolderSuffix));
+
+        const workspacePath = path.resolve(os.homedir(), '.theia', 'jdt.ls', '_ws_' + dataFolderSuffix);
         const configuration = configurations.get(process.platform);
         if (!configuration) {
             throw new Error('Cannot find Java server configuration for ' + process.platform);
@@ -112,6 +141,17 @@ export class JavaContribution extends BaseLanguageServerContribution {
             this.createProcessSocketConnection(socket, socket, command, args, { env })
                 .then(serverConnection => this.forward(clientConnection, serverConnection));
         });
+    }
+
+    protected generateDataFolderSuffix(workspaceUri: string): string {
+        const shaValue = sha1(workspaceUri);
+        let instanceCounter = 0;
+        let dataFolderName = shaValue + '_' + instanceCounter;
+        while (this.activeDataFolders.has(dataFolderName)) {
+            instanceCounter++;
+            dataFolderName = shaValue + '_' + instanceCounter;
+        }
+        return dataFolderName;
     }
 
     protected map(message: Message): Message {

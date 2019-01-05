@@ -27,13 +27,14 @@ import {
     LanguageClientFactory,
     LanguageClientOptions
 } from '@theia/languages/lib/browser';
-import { JAVA_LANGUAGE_ID, JAVA_LANGUAGE_NAME } from '../common';
+import { JAVA_LANGUAGE_ID, JAVA_LANGUAGE_NAME, JavaStartParams } from '../common';
 import {
     ActionableNotification,
     ActionableMessage,
     StatusReport,
     StatusNotification,
 } from './java-protocol';
+import { MaybePromise } from '@theia/core';
 
 @injectable()
 export class JavaClientContribution extends BaseLanguageClientContribution {
@@ -61,6 +62,10 @@ export class JavaClientContribution extends BaseLanguageClientContribution {
 
     protected get workspaceContains() {
         return ['pom.xml', 'build.gradle'];
+    }
+
+    get configurationSection() {
+        return 'java';
     }
 
     protected onReady(languageClient: ILanguageClient): void {
@@ -110,6 +115,11 @@ export class JavaClientContribution extends BaseLanguageClientContribution {
             }
         };
         return options;
+    }
+
+    protected getStartParameters(): MaybePromise<JavaStartParams> {
+        const workspace = this.workspace.rootUri ? this.workspace.rootUri : undefined;
+        return { workspace };
     }
 
 }

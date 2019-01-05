@@ -14,7 +14,7 @@
  * SPDX-License-Identifier: EPL-2.0 OR GPL-2.0 WITH Classpath-exception-2.0
  ********************************************************************************/
 
-import { Widget, Message, BaseWidget, Key, StatefulWidget, MessageLoop, ConfirmDialog } from '@theia/core/lib/browser';
+import { Widget, Message, BaseWidget, Key, StatefulWidget, MessageLoop } from '@theia/core/lib/browser';
 import { inject, injectable, postConstruct } from 'inversify';
 import { SearchInWorkspaceResultTreeWidget } from './search-in-workspace-result-tree-widget';
 import { SearchInWorkspaceOptions } from '../common/search-in-workspace-interface';
@@ -107,7 +107,9 @@ export class SearchInWorkspaceWidget extends BaseWidget implements StatefulWidge
             this.hasResults = r.size > 0;
             this.resultNumber = 0;
             const results = Array.from(r.values());
-            results.forEach(result => this.resultNumber += result.children.length);
+            results.forEach(rootFolder =>
+                rootFolder.children.forEach(file => this.resultNumber += file.children.length)
+            );
             this.update();
         }));
 
@@ -162,7 +164,7 @@ export class SearchInWorkspaceWidget extends BaseWidget implements StatefulWidge
 
     protected onAfterAttach(msg: Message) {
         super.onAfterAttach(msg);
-        ReactDOM.render(<React.Fragment>{this.renderSearchHeader()}</React.Fragment>, this.searchFormContainer);
+        ReactDOM.render(<React.Fragment>{this.renderSearchHeader()}{this.renderSearchInfo()}</React.Fragment>, this.searchFormContainer);
         Widget.attach(this.resultTreeWidget, this.contentNode);
         this.toDisposeOnDetach.push(Disposable.create(() => {
             Widget.detach(this.resultTreeWidget);
@@ -171,7 +173,7 @@ export class SearchInWorkspaceWidget extends BaseWidget implements StatefulWidge
 
     protected onUpdateRequest(msg: Message) {
         super.onUpdateRequest(msg);
-        ReactDOM.render(<React.Fragment>{this.renderSearchHeader()}</React.Fragment>, this.searchFormContainer);
+        ReactDOM.render(<React.Fragment>{this.renderSearchHeader()}{this.renderSearchInfo()}</React.Fragment>, this.searchFormContainer);
     }
 
     protected onResize(msg: Widget.ResizeMessage): void {
@@ -372,23 +374,9 @@ export class SearchInWorkspaceWidget extends BaseWidget implements StatefulWidge
             <span
                 title='Replace All'
                 className={`replace-all-button${this.searchTerm === '' ? ' disabled' : ''}`}
-                onClick={async () => {
-                    if (await this.confirmReplaceAll()) {
-                        this.resultTreeWidget.replaceAll();
-                    }
-                }}>
+                onClick={() => this.resultTreeWidget.replace(undefined)}>
             </span>
         </div>;
-    }
-
-    protected confirmReplaceAll(): Promise<boolean | undefined> {
-        const r = this.resultNumber;
-        const n = this.resultTreeWidget.fileNumber;
-        const go = n > 1;
-        return new ConfirmDialog({
-            title: 'Replace all',
-            msg: `Do you really want to replace ${r} match${r > 1 ? 'es' : ''} ${go ? 'across' : 'in'} ${n} file${go ? 's' : ''} with "${this.replaceTerm}"?`
-        }).open();
     }
 
     protected renderOptionContainer(): React.ReactNode {
@@ -468,6 +456,24 @@ export class SearchInWorkspaceWidget extends BaseWidget implements StatefulWidge
     }
 
     protected splitOnComma(patterns: string): string[] {
-        return patterns.split(',').map(s => s.trim());
+        return patterns.length > 0 ? patterns.split(',').map(s => s.trim()) : [];
+    }
+
+    protected renderSearchInfo(): React.ReactNode {
+        let message = '';
+        if (this.searchInWorkspaceOptions.include && this.searchInWorkspaceOptions.include.length > 0 && this.resultNumber === 0) {
+            message = `No results found in '${this.searchInWorkspaceOptions.include}'`;
+        } else if (this.resultNumber === 0) {
+            message = 'No results found.';
+        } else {
+            if (this.resultNumber === 1 && this.resultTreeWidget.fileNumber === 1) {
+                message = `${this.resultNumber} result in ${this.resultTreeWidget.fileNumber} file`;
+            } else if (this.resultTreeWidget.fileNumber === 1) {
+                message = `${this.resultNumber} results in ${this.resultTreeWidget.fileNumber} file`;
+            } else {
+                message = `${this.resultNumber} results in ${this.resultTreeWidget.fileNumber} files`;
+            }
+        }
+        return this.searchTerm !== '' ? <div className='search-info'>{message}</div> : '';
     }
 }

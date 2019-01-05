@@ -147,7 +147,7 @@ export class GitViewContribution extends AbstractViewContribution<GitWidget>
         });
         this.repositoryTracker.onGitEvent(event => {
             const { status } = event;
-            const branch = status.branch ? status.branch : 'NO-HEAD';
+            const branch = status.branch ? status.branch : status.currentHead ? status.currentHead.substring(0, 8) : 'NO-HEAD';
             let dirty = '';
             if (status.changes.length > 0) {
                 const conflicts = this.hasConflicts(status.changes);
@@ -267,7 +267,7 @@ export class GitViewContribution extends AbstractViewContribution<GitWidget>
         registry.registerCommand(GIT_COMMANDS.CLONE, {
             isEnabled: () => this.workspaceService.opened,
             // tslint:disable-next-line:no-any
-            execute: (args: any[]) => {
+            execute: (...args: any[]) => {
                 let url: string | undefined = undefined;
                 let folder: string | undefined = undefined;
                 let branch: string | undefined = undefined;

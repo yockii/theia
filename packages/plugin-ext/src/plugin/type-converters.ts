@@ -14,13 +14,17 @@
  * SPDX-License-Identifier: EPL-2.0 OR GPL-2.0 WITH Classpath-exception-2.0
  ********************************************************************************/
 
-import { EditorPosition, Selection, Position, DecorationOptions, WorkspaceEditDto, ResourceTextEditDto, ResourceFileEditDto } from '../api/plugin-api';
+import { EditorPosition, Selection, Position, DecorationOptions, WorkspaceEditDto, ResourceTextEditDto, ResourceFileEditDto, TaskDto, ProcessTaskDto } from '../api/plugin-api';
 import * as model from '../api/model';
 import * as theia from '@theia/plugin';
 import * as types from './types-impl';
 import { LanguageSelector, LanguageFilter, RelativePattern } from './languages';
 import { isMarkdownString } from './markdown-string';
 import URI from 'vscode-uri';
+
+const SIDE_GROUP = -2;
+const ACTIVE_GROUP = -1;
+import { SymbolInformation, Range as R, Position as P, SymbolKind as S } from 'vscode-languageserver-types';
 
 export function toViewColumn(ep?: EditorPosition): theia.ViewColumn | undefined {
     if (typeof ep !== 'number') {
@@ -36,6 +40,18 @@ export function toViewColumn(ep?: EditorPosition): theia.ViewColumn | undefined 
     }
 
     return undefined;
+}
+
+export function fromViewColumn(column?: theia.ViewColumn): number {
+    if (typeof column === 'number' && column >= types.ViewColumn.One) {
+        return column - 1;
+    }
+
+    if (column! === <number>types.ViewColumn.Beside) {
+        return SIDE_GROUP;
+    }
+
+    return ACTIVE_GROUP;
 }
 
 export function toSelection(selection: Selection): types.Selection {
@@ -369,6 +385,22 @@ export function fromDocumentLink(definitionLink: theia.DocumentLink): model.Docu
     };
 }
 
+export function fromDocumentHighlightKind(kind?: theia.DocumentHighlightKind): model.DocumentHighlightKind | undefined {
+    switch (kind) {
+        case types.DocumentHighlightKind.Text: return model.DocumentHighlightKind.Text;
+        case types.DocumentHighlightKind.Read: return model.DocumentHighlightKind.Read;
+        case types.DocumentHighlightKind.Write: return model.DocumentHighlightKind.Write;
+    }
+    return model.DocumentHighlightKind.Text;
+}
+
+export function fromDocumentHighlight(documentHighlight: theia.DocumentHighlight): model.DocumentHighlight {
+    return <model.DocumentHighlight>{
+        range: fromRange(documentHighlight.range),
+        kind: fromDocumentHighlightKind(documentHighlight.kind)
+    };
+}
+
 export function toInternalCommand(command: theia.Command): model.Command {
     return {
         id: command.id,
@@ -400,32 +432,32 @@ export function fromWorkspaceEdit(value: theia.WorkspaceEdit, documents?: any): 
 export namespace SymbolKind {
     // tslint:disable-next-line:no-null-keyword
     const fromMapping: { [kind: number]: model.SymbolKind } = Object.create(null);
-    fromMapping[types.SymbolKind.File] = model.SymbolKind.File;
-    fromMapping[types.SymbolKind.Module] = model.SymbolKind.Module;
-    fromMapping[types.SymbolKind.Namespace] = model.SymbolKind.Namespace;
-    fromMapping[types.SymbolKind.Package] = model.SymbolKind.Package;
-    fromMapping[types.SymbolKind.Class] = model.SymbolKind.Class;
-    fromMapping[types.SymbolKind.Method] = model.SymbolKind.Method;
-    fromMapping[types.SymbolKind.Property] = model.SymbolKind.Property;
-    fromMapping[types.SymbolKind.Field] = model.SymbolKind.Field;
-    fromMapping[types.SymbolKind.Constructor] = model.SymbolKind.Constructor;
-    fromMapping[types.SymbolKind.Enum] = model.SymbolKind.Enum;
-    fromMapping[types.SymbolKind.Interface] = model.SymbolKind.Interface;
-    fromMapping[types.SymbolKind.Function] = model.SymbolKind.Function;
-    fromMapping[types.SymbolKind.Variable] = model.SymbolKind.Variable;
-    fromMapping[types.SymbolKind.Constant] = model.SymbolKind.Constant;
-    fromMapping[types.SymbolKind.String] = model.SymbolKind.String;
-    fromMapping[types.SymbolKind.Number] = model.SymbolKind.Number;
-    fromMapping[types.SymbolKind.Boolean] = model.SymbolKind.Boolean;
-    fromMapping[types.SymbolKind.Array] = model.SymbolKind.Array;
-    fromMapping[types.SymbolKind.Object] = model.SymbolKind.Object;
-    fromMapping[types.SymbolKind.Key] = model.SymbolKind.Key;
-    fromMapping[types.SymbolKind.Null] = model.SymbolKind.Null;
-    fromMapping[types.SymbolKind.EnumMember] = model.SymbolKind.EnumMember;
-    fromMapping[types.SymbolKind.Struct] = model.SymbolKind.Struct;
-    fromMapping[types.SymbolKind.Event] = model.SymbolKind.Event;
-    fromMapping[types.SymbolKind.Operator] = model.SymbolKind.Operator;
-    fromMapping[types.SymbolKind.TypeParameter] = model.SymbolKind.TypeParameter;
+    fromMapping[model.SymbolKind.File] = model.SymbolKind.File;
+    fromMapping[model.SymbolKind.Module] = model.SymbolKind.Module;
+    fromMapping[model.SymbolKind.Namespace] = model.SymbolKind.Namespace;
+    fromMapping[model.SymbolKind.Package] = model.SymbolKind.Package;
+    fromMapping[model.SymbolKind.Class] = model.SymbolKind.Class;
+    fromMapping[model.SymbolKind.Method] = model.SymbolKind.Method;
+    fromMapping[model.SymbolKind.Property] = model.SymbolKind.Property;
+    fromMapping[model.SymbolKind.Field] = model.SymbolKind.Field;
+    fromMapping[model.SymbolKind.Constructor] = model.SymbolKind.Constructor;
+    fromMapping[model.SymbolKind.Enum] = model.SymbolKind.Enum;
+    fromMapping[model.SymbolKind.Interface] = model.SymbolKind.Interface;
+    fromMapping[model.SymbolKind.Function] = model.SymbolKind.Function;
+    fromMapping[model.SymbolKind.Variable] = model.SymbolKind.Variable;
+    fromMapping[model.SymbolKind.Constant] = model.SymbolKind.Constant;
+    fromMapping[model.SymbolKind.String] = model.SymbolKind.String;
+    fromMapping[model.SymbolKind.Number] = model.SymbolKind.Number;
+    fromMapping[model.SymbolKind.Boolean] = model.SymbolKind.Boolean;
+    fromMapping[model.SymbolKind.Array] = model.SymbolKind.Array;
+    fromMapping[model.SymbolKind.Object] = model.SymbolKind.Object;
+    fromMapping[model.SymbolKind.Key] = model.SymbolKind.Key;
+    fromMapping[model.SymbolKind.Null] = model.SymbolKind.Null;
+    fromMapping[model.SymbolKind.EnumMember] = model.SymbolKind.EnumMember;
+    fromMapping[model.SymbolKind.Struct] = model.SymbolKind.Struct;
+    fromMapping[model.SymbolKind.Event] = model.SymbolKind.Event;
+    fromMapping[model.SymbolKind.Operator] = model.SymbolKind.Operator;
+    fromMapping[model.SymbolKind.TypeParameter] = model.SymbolKind.TypeParameter;
 
     export function fromSymbolKind(kind: theia.SymbolKind): model.SymbolKind {
         return fromMapping[kind] || model.SymbolKind.Property;
@@ -437,7 +469,7 @@ export namespace SymbolKind {
                 return Number(k);
             }
         }
-        return types.SymbolKind.Property;
+        return model.SymbolKind.Property;
     }
 }
 
@@ -455,24 +487,282 @@ export function fromDocumentSymbol(info: theia.DocumentSymbol): model.DocumentSy
     return result;
 }
 
-export function toDocumentSymbol(info: model.DocumentSymbol): theia.DocumentSymbol {
-    const result = new types.DocumentSymbol(
-        info.name,
-        info.detail,
-        SymbolKind.toSymbolKind(info.kind),
-        toRange(info.range),
-        toRange(info.selectionRange),
-    );
-    if (info.children) {
-        result.children = info.children.map(toDocumentSymbol) as any;
-    }
-    return result;
-}
-
 export function toWorkspaceFolder(folder: model.WorkspaceFolder): theia.WorkspaceFolder {
     return {
         uri: URI.revive(folder.uri),
         name: folder.name,
         index: folder.index
+    };
+}
+
+export function fromTask(task: theia.Task): TaskDto | undefined {
+    if (!task) {
+        return undefined;
+    }
+
+    const taskDto = {} as TaskDto;
+    taskDto.label = task.name;
+
+    const taskDefinition = task.definition;
+    if (!taskDefinition) {
+        return taskDto;
+    }
+
+    taskDto.type = taskDefinition.type;
+    taskDto.properties = {};
+    for (const key in taskDefinition) {
+        if (key !== 'type' && taskDefinition.hasOwnProperty(key)) {
+            taskDto.properties[key] = taskDefinition[key];
+        }
+    }
+
+    const execution = task.execution;
+    if (!execution) {
+        return taskDto;
+    }
+
+    const processTaskDto = taskDto as ProcessTaskDto;
+    if (taskDefinition.type === 'shell') {
+        return fromShellExecution(execution, processTaskDto);
+    }
+
+    if (taskDefinition.type === 'process') {
+        return fromProcessExecution(<theia.ProcessExecution>execution, processTaskDto);
+    }
+
+    return processTaskDto;
+}
+
+export function toTask(taskDto: TaskDto): theia.Task {
+    if (!taskDto) {
+        throw new Error('Task should be provided for converting');
+    }
+
+    const result = {} as theia.Task;
+    result.name = taskDto.label;
+
+    const taskType = taskDto.type;
+    const taskDefinition: theia.TaskDefinition = {
+        type: taskType
+    };
+
+    result.definition = taskDefinition;
+
+    if (taskType === 'process') {
+        result.execution = getProcessExecution(taskDto as ProcessTaskDto);
+    }
+
+    if (taskType === 'shell') {
+        result.execution = getShellExecution(taskDto as ProcessTaskDto);
+    }
+
+    const properties = taskDto.properties;
+    if (!properties) {
+        return result;
+    }
+
+    for (const key in properties) {
+        if (properties.hasOwnProperty(key)) {
+            taskDefinition[key] = properties[key];
+        }
+    }
+
+    return result;
+}
+
+export function fromProcessExecution(execution: theia.ProcessExecution, processTaskDto: ProcessTaskDto): ProcessTaskDto {
+    processTaskDto.command = execution.process;
+    processTaskDto.args = execution.args;
+
+    const options = execution.options;
+    if (options) {
+        processTaskDto.cwd = options.cwd;
+        processTaskDto.options = options;
+    }
+    return processTaskDto;
+}
+
+export function fromShellExecution(execution: theia.ShellExecution, processTaskDto: ProcessTaskDto): ProcessTaskDto {
+    const options = execution.options;
+    if (options) {
+        processTaskDto.cwd = options.cwd;
+        processTaskDto.options = getShellExecutionOptions(options);
+    }
+
+    const commandLine = execution.commandLine;
+    if (commandLine) {
+        const args = commandLine.split(' ');
+        const taskCommand = args.shift();
+
+        if (taskCommand) {
+            processTaskDto.command = taskCommand;
+        }
+
+        processTaskDto.args = args;
+        return processTaskDto;
+    }
+
+    const command = execution.command;
+    if (typeof command === 'string') {
+        processTaskDto.command = command;
+        processTaskDto.args = getShellArgs(execution.args);
+        return processTaskDto;
+    } else {
+        throw new Error('Converting ShellQuotedString command is not implemented');
+    }
+}
+
+export function getProcessExecution(processTaskDto: ProcessTaskDto): theia.ProcessExecution {
+    const execution = {} as theia.ProcessExecution;
+
+    execution.process = processTaskDto.command;
+
+    const processArgs = processTaskDto.args;
+    execution.args = processArgs ? processArgs : [];
+
+    const options = processTaskDto.options;
+    execution.options = options ? options : {};
+    execution.options.cwd = processTaskDto.cwd;
+
+    return execution;
+}
+
+export function getShellExecution(processTaskDto: ProcessTaskDto): theia.ShellExecution {
+    const execution = {} as theia.ShellExecution;
+
+    const options = processTaskDto.options;
+    execution.options = options ? options : {};
+    execution.options.cwd = processTaskDto.cwd;
+    execution.args = processTaskDto.args;
+
+    execution.command = processTaskDto.command;
+
+    return execution;
+}
+
+export function getShellArgs(args: undefined | (string | theia.ShellQuotedString)[]): string[] {
+    if (!args || args.length === 0) {
+        return [];
+    }
+
+    const element = args[0];
+    if (typeof element === 'string') {
+        return args as string[];
+    }
+
+    const result: string[] = [];
+    const shellQuotedArgs = args as theia.ShellQuotedString[];
+
+    shellQuotedArgs.forEach(arg => {
+        result.push(arg.value);
+    });
+
+    return result;
+}
+
+// tslint:disable-next-line:no-any
+export function getShellExecutionOptions(options: theia.ShellExecutionOptions): { [key: string]: any } {
+    // tslint:disable-next-line:no-any
+    const result = {} as { [key: string]: any };
+
+    const env = options.env;
+    if (env) {
+        result['env'] = env;
+    }
+
+    const executable = options.executable;
+    if (executable) {
+        result['executable'] = executable;
+    }
+
+    const shellQuoting = options.shellQuoting;
+    if (shellQuoting) {
+        result['shellQuoting'] = shellQuoting;
+    }
+
+    const shellArgs = options.shellArgs;
+    if (shellArgs) {
+        result['shellArgs'] = shellArgs;
+    }
+
+    return result;
+}
+
+export function fromSymbolInformation(symbolInformation: theia.SymbolInformation): SymbolInformation | undefined {
+    if (!symbolInformation) {
+        return undefined;
+    }
+
+    if (symbolInformation.location && symbolInformation.location.range) {
+        const p1 = P.create(symbolInformation.location.range.start.line, symbolInformation.location.range.start.character);
+        const p2 = P.create(symbolInformation.location.range.end.line, symbolInformation.location.range.end.character);
+        return SymbolInformation.create(symbolInformation.name, symbolInformation.kind++ as S, R.create(p1, p2),
+            symbolInformation.location.uri.toString(), symbolInformation.containerName);
+    }
+
+    return <SymbolInformation>{
+        name: symbolInformation.name,
+        containerName: symbolInformation.containerName,
+        kind: symbolInformation.kind++ as S,
+        location: {
+            uri: symbolInformation.location.uri.toString()
+        }
+    };
+}
+
+export function toSymbolInformation(symbolInformation: SymbolInformation): theia.SymbolInformation | undefined {
+    if (!symbolInformation) {
+        return undefined;
+    }
+
+    return <theia.SymbolInformation>{
+        name: symbolInformation.name,
+        containerName: symbolInformation.containerName,
+        kind: symbolInformation.kind,
+        location: {
+            uri: URI.parse(symbolInformation.location.uri),
+            range: symbolInformation.location.range
+        }
+    };
+}
+
+export function fromFoldingRange(foldingRange: theia.FoldingRange): model.FoldingRange {
+    const range: model.FoldingRange = {
+        start: foldingRange.start + 1,
+        end: foldingRange.end + 1
+    };
+    if (foldingRange.kind) {
+        range.kind = fromFoldingRangeKind(foldingRange.kind);
+    }
+    return range;
+}
+
+export function fromFoldingRangeKind(kind: theia.FoldingRangeKind | undefined): model.FoldingRangeKind | undefined {
+    if (kind) {
+        switch (kind) {
+            case types.FoldingRangeKind.Comment:
+                return model.FoldingRangeKind.Comment;
+            case types.FoldingRangeKind.Imports:
+                return model.FoldingRangeKind.Imports;
+            case types.FoldingRangeKind.Region:
+                return model.FoldingRangeKind.Region;
+        }
+    }
+    return undefined;
+}
+
+export function fromColor(color: types.Color): [number, number, number, number] {
+    return [color.red, color.green, color.blue, color.alpha];
+}
+
+export function toColor(color: [number, number, number, number]): types.Color {
+    return new types.Color(color[0], color[1], color[2], color[3]);
+}
+
+export function fromColorPresentation(colorPresentation: theia.ColorPresentation): model.ColorPresentation {
+    return {
+        label: colorPresentation.label,
+        textEdit: colorPresentation.textEdit ? fromTextEdit(colorPresentation.textEdit) : undefined,
+        additionalTextEdits: colorPresentation.additionalTextEdits ? colorPresentation.additionalTextEdits.map(value  => fromTextEdit(value)) : undefined
     };
 }

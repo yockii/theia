@@ -1,5 +1,6 @@
+#!/usr/bin/env node
 /********************************************************************************
- * Copyright (C) 2018 Ericsson and others.
+ * Copyright (C) 2018 TypeFox and others.
  *
  * This program and the accompanying materials are made available under the
  * terms of the Eclipse Public License v. 2.0 which is available at
@@ -14,18 +15,14 @@
  * SPDX-License-Identifier: EPL-2.0 OR GPL-2.0 WITH Classpath-exception-2.0
  ********************************************************************************/
 
-import { injectable } from 'inversify';
-import { IWorkspaceService } from '../../browser/workspace-service';
-import { FileStat } from '@theia/filesystem/lib/common/filesystem';
+const request = require('request');
+const unzip = require('unzip-stream');
+const path = require('path');
+const process = require('process');
 
-@injectable()
-export class MockWorkspaceService implements IWorkspaceService {
-    get roots(): Promise<FileStat[]> {
-        const stat: FileStat = {
-            uri: 'file:///workspace',
-            lastModification: 0,
-            isDirectory: true
-        };
-        return Promise.resolve([stat]);
-    }
+const pck = require(path.resolve(process.cwd(), 'package.json'));
+for (const name in pck.adapters) {
+    const url = pck.adapters[name];
+    const targetPath = path.join(process.cwd(), '/download', name);
+    request(url).pipe(unzip.Extract({ path: targetPath }));
 }

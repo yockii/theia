@@ -14,13 +14,11 @@
  * SPDX-License-Identifier: EPL-2.0 OR GPL-2.0 WITH Classpath-exception-2.0
  ********************************************************************************/
 
-const request = require('request');
-const unzip = require('unzip-stream');
-const path = require('path');
+import { ContainerModule } from 'inversify';
+import { GitInit } from '../../node/init/git-init';
+import { ElectronGitInit } from './electron-git-init';
 
-const pck = require('../package.json');
-for (const name in pck.adapters) {
-    const url = pck.adapters[name];
-    const targetPath = path.join(__dirname, '../download', name);
-    request(url).pipe(unzip.Extract({ path: targetPath }));
-}
+export default new ContainerModule(bind => {
+    bind(ElectronGitInit).toSelf();
+    bind(GitInit).toService(ElectronGitInit);
+});

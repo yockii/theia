@@ -21,6 +21,7 @@ import { MonacoCommands } from './monaco-command';
 import { MonacoCommandRegistry } from './monaco-command-registry';
 import { KEY_CODE_MAP } from './monaco-keycode-map';
 import KeybindingsRegistry = monaco.keybindings.KeybindingsRegistry;
+import { isOSX } from '@theia/core';
 
 function monaco2BrowserKeyCode(keyCode: monaco.KeyCode): number {
     for (let i = 0; i < KEY_CODE_MAP.length; i++) {
@@ -45,16 +46,19 @@ export class MonacoKeybindingContribution implements KeybindingContribution {
                 if (raw.type === monaco.keybindings.KeybindingType.Simple) {
                     let keybinding = raw as monaco.keybindings.SimpleKeybinding;
                     // TODO: remove this temporary workaround after updating to monaco including the fix for https://github.com/Microsoft/vscode/issues/49225
-                    if (command === 'monaco.editor.action.refactor') {
-                        if (monaco.platform.OS !== monaco.platform.OperatingSystem.Macintosh) {
-                            keybinding = { ...keybinding, ctrlKey: true, metaKey: false };
-                        }
+                    if (command === 'monaco.editor.action.refactor' && !isOSX) {
+                        keybinding = { ...keybinding, ctrlKey: true, metaKey: false };
                     }
-                    const isInDiffEditor = item.when && /(?<!\!\s*)isInDiffEditor/gm.test(item.when.serialize());
+                    // TODO: remove this temporary workaround with a holistic solution.
+                    if (command === 'monaco.editor.action.commentLine' && isOSX) {
+                        keybinding = { ...keybinding, ctrlKey: true, metaKey: false };
+                    }
+                    const isInDiffEditor = item.when && /(^|[^!])\bisInDiffEditor\b/gm.test(item.when.serialize());
                     registry.registerKeybinding({
                         command,
                         keybinding: this.keyCode(keybinding).toString(),
-                        context: isInDiffEditor ? EditorKeybindingContexts.diffEditorTextFocus : EditorKeybindingContexts.editorTextFocus
+                        context: isInDiffEditor ? EditorKeybindingContexts.diffEditorTextFocus : EditorKeybindingContexts.strictEditorTextFocus
+
                     });
                 } else {
                     // FIXME support chord keybindings properly, KeyCode does not allow it right now
@@ -80,7 +84,11 @@ export class MonacoKeybindingContribution implements KeybindingContribution {
             modifiers: []
         };
         if (keybinding.ctrlKey) {
-            sequence.modifiers!.push(KeyModifier.CtrlCmd);
+            if (isOSX) {
+                sequence.modifiers!.push(KeyModifier.MacCtrl);
+            } else {
+                sequence.modifiers!.push(KeyModifier.CtrlCmd);
+            }
         }
         if (keybinding.shiftKey) {
             sequence.modifiers!.push(KeyModifier.Shift);
@@ -88,8 +96,8 @@ export class MonacoKeybindingContribution implements KeybindingContribution {
         if (keybinding.altKey) {
             sequence.modifiers!.push(KeyModifier.Alt);
         }
-        if (keybinding.metaKey) {
-            sequence.modifiers!.push(KeyModifier.MacCtrl);
+        if (keybinding.metaKey && sequence.modifiers!.indexOf(KeyModifier.CtrlCmd) === -1) {
+            sequence.modifiers!.push(KeyModifier.CtrlCmd);
         }
         return KeyCode.createKeyCode(sequence);
     }

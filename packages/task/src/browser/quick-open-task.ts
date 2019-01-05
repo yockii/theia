@@ -43,6 +43,12 @@ export class QuickOpenTask implements QuickOpenModel, QuickOpenHandler {
         this.items = [];
 
         const configuredTasks = await this.taskConfigurations.getTasks();
+        if (!configuredTasks.length) {
+            this.items.push(new QuickOpenItem({
+                label: 'No tasks found',
+                run: (mode: QuickOpenMode): boolean => false
+            }));
+        }
         for (const task of configuredTasks) {
             this.items.push(new TaskRunQuickOpenItem(task, this.taskService, false));
         }
@@ -77,6 +83,12 @@ export class QuickOpenTask implements QuickOpenModel, QuickOpenHandler {
         this.items = [];
 
         this.taskService.getRunningTasks().then(tasks => {
+            if (!tasks.length) {
+                this.items.push(new QuickOpenItem({
+                    label: 'No tasks found',
+                    run: (_mode: QuickOpenMode): boolean => false
+                }));
+            }
             for (const task of tasks) {
                 // can only attach to terminal processes, so only list those
                 if (task.terminalId) {

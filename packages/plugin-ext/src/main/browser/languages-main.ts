@@ -23,20 +23,25 @@ import {
     MAIN_RPC_CONTEXT,
     LanguagesExt
 } from '../../api/plugin-api';
-import { SerializedDocumentFilter, MarkerData, Range } from '../../api/model';
+import { interfaces } from 'inversify';
+import { SerializedDocumentFilter, MarkerData, Range, WorkspaceSymbolProvider } from '../../api/model';
 import { RPCProtocol } from '../../api/rpc-protocol';
 import { fromLanguageSelector } from '../../plugin/type-converters';
 import { UriComponents } from '../../common/uri-components';
 import { LanguageSelector } from '../../plugin/languages';
 import { DocumentFilter, MonacoModelIdentifier, testGlob, getLanguages } from 'monaco-languageclient/lib';
 import { DisposableCollection, Emitter } from '@theia/core';
+import { MonacoLanguages } from '@theia/monaco/lib/browser/monaco-languages';
 
 export class LanguagesMainImpl implements LanguagesMain {
 
+    private ml: MonacoLanguages;
+
     private readonly proxy: LanguagesExt;
     private readonly disposables = new Map<number, monaco.IDisposable>();
-    constructor(rpc: RPCProtocol) {
+    constructor(rpc: RPCProtocol, container: interfaces.Container) {
         this.proxy = rpc.getProxy(MAIN_RPC_CONTEXT.LANGUAGES_EXT);
+        this.ml = container.get(MonacoLanguages);
     }
 
     $getLanguages(): Promise<string[]> {
@@ -170,6 +175,48 @@ export class LanguagesMainImpl implements LanguagesMain {
         }
     }
 
+    $registerImplementationProvider(handle: number, selector: SerializedDocumentFilter[]): void {
+        const languageSelector = fromLanguageSelector(selector);
+        const implementationProvider = this.createImplementationProvider(handle, languageSelector);
+        const disposable = new DisposableCollection();
+        for (const language of getLanguages()) {
+            if (this.matchLanguage(languageSelector, language)) {
+                disposable.push(monaco.languages.registerImplementationProvider(language, implementationProvider));
+            }
+        }
+        this.disposables.set(handle, disposable);
+    }
+
+    protected createImplementationProvider(handle: number, selector: LanguageSelector | undefined): monaco.languages.ImplementationProvider {
+        return {
+            provideImplementation: (model, position, token) => {
+                if (!this.matchModel(selector, MonacoModelIdentifier.fromModel(model))) {
+                    return undefined!;
+                }
+                return this.proxy.$provideImplementation(handle, model.uri, position).then(result => {
+                    if (!result) {
+                        return undefined!;
+                    }
+
+                    if (Array.isArray(result)) {
+                        // using DefinitionLink because Location is mandatory part of DefinitionLink
+                        const definitionLinks: monaco.languages.DefinitionLink[] = [];
+                        for (const item of result) {
+                            definitionLinks.push({ ...item, uri: monaco.Uri.revive(item.uri) });
+                        }
+                        return definitionLinks;
+                    } else {
+                        // single Location
+                        return <monaco.languages.Location>{
+                            uri: monaco.Uri.revive(result.uri),
+                            range: result.range
+                        };
+                    }
+                });
+            }
+        };
+    }
+
     $registerTypeDefinitionProvider(handle: number, selector: SerializedDocumentFilter[]): void {
         const languageSelector = fromLanguageSelector(selector);
         const typeDefinitionProvider = this.createTypeDefinitionProvider(handle, languageSelector);
@@ -232,6 +279,62 @@ export class LanguagesMainImpl implements LanguagesMain {
                 }
                 return this.proxy.$provideHover(handle, model.uri, position).then(v => v!);
             }
+        };
+    }
+
+    $registerDocumentHighlightProvider(handle: number, selector: SerializedDocumentFilter[]): void {
+        const languageSelector = fromLanguageSelector(selector);
+        const documentHighlightProvider = this.createDocumentHighlightProvider(handle, languageSelector);
+        const disposable = new DisposableCollection();
+        for (const language of getLanguages()) {
+            if (this.matchLanguage(languageSelector, language)) {
+                disposable.push(monaco.languages.registerDocumentHighlightProvider(language, documentHighlightProvider));
+            }
+        }
+        this.disposables.set(handle, disposable);
+    }
+
+    protected createDocumentHighlightProvider(handle: number, selector: LanguageSelector | undefined): monaco.languages.DocumentHighlightProvider {
+        return {
+            provideDocumentHighlights: (model, position, token) => {
+                if (!this.matchModel(selector, MonacoModelIdentifier.fromModel(model))) {
+                    return undefined!;
+                }
+                return this.proxy.$provideDocumentHighlights(handle, model.uri, position).then(result => {
+                    if (!result) {
+                        return undefined!;
+                    }
+
+                    if (Array.isArray(result)) {
+                        const highlights: monaco.languages.DocumentHighlight[] = [];
+                        for (const item of result) {
+                            highlights.push(
+                                {
+                                    ...item,
+                                    kind: (item.kind ? item.kind : monaco.languages.DocumentHighlightKind.Text)
+                                });
+                        }
+                        return highlights;
+                    }
+
+                    return undefined!;
+                });
+
+            }
+        };
+    }
+
+    $registerWorkspaceSymbolProvider(handle: number): void {
+        const workspaceSymbolProvider = this.createWorkspaceSymbolProvider(handle);
+        const disposable = new DisposableCollection();
+        disposable.push(this.ml.registerWorkspaceSymbolProvider(workspaceSymbolProvider));
+        this.disposables.set(handle, disposable);
+    }
+
+    protected createWorkspaceSymbolProvider(handle: number): WorkspaceSymbolProvider {
+        return {
+            provideWorkspaceSymbols: (params, token) => this.proxy.$provideWorkspaceSymbols(handle, params.query),
+            resolveWorkspaceSymbol: (symbol, token) => this.proxy.$resolveWorkspaceSymbol(handle, symbol)
         };
     }
 
@@ -430,6 +533,77 @@ export class LanguagesMainImpl implements LanguagesMain {
                 }
                 return this.proxy.$provideOnTypeFormattingEdits(handle, model.uri, position, ch, options).then(v => v!);
             }
+        };
+    }
+
+    $registerFoldingRangeProvider(handle: number, selector: SerializedDocumentFilter[]): void {
+        const languageSelector = fromLanguageSelector(selector);
+        const provider = this.createFoldingRangeProvider(handle, languageSelector);
+        const disposable = new DisposableCollection();
+        for (const language of getLanguages()) {
+            if (this.matchLanguage(languageSelector, language)) {
+                disposable.push(monaco.languages.registerFoldingRangeProvider(language, provider));
+            }
+        }
+        this.disposables.set(handle, disposable);
+    }
+
+    createFoldingRangeProvider(handle: number, selector: LanguageSelector | undefined): monaco.languages.FoldingRangeProvider {
+        return {
+            provideFoldingRanges: (model, context, token) => {
+                if (!this.matchModel(selector, MonacoModelIdentifier.fromModel(model))) {
+                    return undefined!;
+                }
+                return this.proxy.$provideFoldingRange(handle, model.uri, context).then(v => v!);
+            }
+        };
+    }
+
+    $registerDocumentColorProvider(handle: number, selector: SerializedDocumentFilter[]): void {
+        const languageSelector = fromLanguageSelector(selector);
+        const colorProvider = this.createColorProvider(handle, languageSelector);
+        const disposable = new DisposableCollection();
+        for (const language of getLanguages()) {
+            if (this.matchLanguage(languageSelector, language)) {
+                disposable.push(monaco.languages.registerColorProvider(language, colorProvider));
+            }
+        }
+        this.disposables.set(handle, disposable);
+    }
+
+    createColorProvider(handle: number, selector: LanguageSelector | undefined): monaco.languages.DocumentColorProvider {
+        return {
+            provideDocumentColors: (model, token) => {
+                if (!this.matchModel(selector, MonacoModelIdentifier.fromModel(model))) {
+                    return undefined!;
+                }
+                return this.proxy.$provideDocumentColors(handle, model.uri).then(documentColors =>
+                    documentColors.map(documentColor => {
+                        const [red, green, blue, alpha] = documentColor.color;
+                        const color = {
+                            red: red,
+                            green: green,
+                            blue: blue,
+                            alpha: alpha
+                        };
+
+                        return {
+                            color,
+                            range: documentColor.range
+                        };
+                    })
+                );
+            },
+            provideColorPresentations: (model, colorInfo, token) =>
+                this.proxy.$provideColorPresentations(handle, model.uri, {
+                    color: [
+                        colorInfo.color.red,
+                        colorInfo.color.green,
+                        colorInfo.color.blue,
+                        colorInfo.color.alpha
+                    ],
+                    range: colorInfo.range
+                })
         };
     }
 

@@ -28,6 +28,7 @@ import { LabelProvider } from '@theia/core/lib/browser/label-provider';
 import { Command } from '@theia/core/lib/common';
 import { NavigationLocationService } from '@theia/editor/lib/browser/navigation/navigation-location-service';
 import * as fuzzy from 'fuzzy';
+import { MessageService } from '@theia/core/lib/common/message-service';
 
 export const quickFileOpen: Command = {
     id: 'file-search.openFile',
@@ -54,6 +55,8 @@ export class QuickFileOpenService implements QuickOpenModel, QuickOpenHandler {
     protected readonly labelProvider: LabelProvider;
     @inject(NavigationLocationService)
     protected readonly navigationLocationService: NavigationLocationService;
+    @inject(MessageService)
+    protected readonly messageService: MessageService;
 
     /**
      * Whether to hide .gitignored (and other ignored) files.
@@ -90,6 +93,7 @@ export class QuickFileOpenService implements QuickOpenModel, QuickOpenHandler {
             placeholder,
             fuzzyMatchLabel: true,
             fuzzyMatchDescription: true,
+            showItemsWithoutHighlight: true,
             onClose: () => {
                 this.isOpen = false;
                 this.cancelIndicator.cancel();
@@ -133,22 +137,19 @@ export class QuickFileOpenService implements QuickOpenModel, QuickOpenHandler {
     private cancelIndicator = new CancellationTokenSource();
 
     public async onType(lookFor: string, acceptor: (items: QuickOpenItem[]) => void): Promise<void> {
-        const workspaceFolder = this.workspaceService.tryGetRoots()[0];
-        if (!workspaceFolder) {
+        const roots = this.workspaceService.tryGetRoots();
+        if (roots.length === 0) {
             return;
         }
 
         this.currentLookFor = lookFor;
-
         this.cancelIndicator.cancel();
         this.cancelIndicator = new CancellationTokenSource();
+
         const token = this.cancelIndicator.token;
-
-        const rootUri = workspaceFolder.uri;
-        const root = new URI(rootUri);
         const alreadyCollected = new Set<string>();
-
         const recentlyUsedItems: QuickOpenItem[] = [];
+
         const locations = [...this.navigationLocationService.locations()].reverse();
         for (const location of locations) {
             const uriString = location.uri.toString();
@@ -158,22 +159,20 @@ export class QuickFileOpenService implements QuickOpenModel, QuickOpenHandler {
             }
         }
         if (lookFor.length > 0) {
-            const handler = async (result: string[]) => {
+            const handler = async (results: string[]) => {
                 if (!token.isCancellationRequested) {
                     const fileSearchResultItems: QuickOpenItem[] = [];
-                    for (const p of result) {
-                        const uri = root.withPath(root.path.join(p));
-                        const uriString = uri.toString();
-                        if (!alreadyCollected.has(uriString)) {
-                            fileSearchResultItems.push(await this.toItem(uri, fileSearchResultItems.length === 0 ? 'file results' : undefined));
-                            alreadyCollected.add(uriString);
+                    for (const fileUri of results) {
+                        if (!alreadyCollected.has(fileUri)) {
+                            fileSearchResultItems.push(await this.toItem(fileUri, fileSearchResultItems.length === 0 ? 'file results' : undefined));
+                            alreadyCollected.add(fileUri);
                         }
                     }
                     acceptor([...recentlyUsedItems, ...fileSearchResultItems]);
                 }
             };
             this.fileSearchService.find(lookFor, {
-                rootUri,
+                rootUris: roots.map(r => r.uri),
                 fuzzyMatch: true,
                 limit: 200,
                 useGitIgnore: this.hideIgnoredFiles,
@@ -193,16 +192,25 @@ export class QuickFileOpenService implements QuickOpenModel, QuickOpenHandler {
         };
     }
 
-    openFile(uri: URI) {
-        this.openerService.getOpener(uri).then(opener => opener.open(uri));
+    openFile(uri: URI): void {
+        this.openerService.getOpener(uri)
+            .then(opener => opener.open(uri))
+            .catch(error => this.messageService.error(error));
     }
 
     private async toItem(uriOrString: URI | string, group?: string) {
         const uri = uriOrString instanceof URI ? uriOrString : new URI(uriOrString);
+        let description = this.labelProvider.getLongName(uri.parent);
+        if (this.workspaceService.workspace && !this.workspaceService.workspace.isDirectory) {
+            const rootUri = this.workspaceService.getWorkspaceRootUri(uri);
+            if (rootUri) {
+                description = `${rootUri.displayName} • ${description}`;
+            }
+        }
         const options: QuickOpenItemOptions = {
             label: this.labelProvider.getName(uri),
             iconClass: await this.labelProvider.getIcon(uri) + ' file-icon',
-            description: this.labelProvider.getLongName(uri.parent),
+            description,
             tooltip: uri.path.toString(),
             uri: uri,
             hidden: false,

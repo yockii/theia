@@ -49,9 +49,14 @@ export interface SearchInWorkspaceOptions {
 
 export interface SearchInWorkspaceResult {
     /**
-     * The path to the file containing the result.
+     * The string uri to the root folder that the search was performed.
      */
-    file: string;
+    root: string;
+
+    /**
+     * The string uri to the file containing the result.
+     */
+    fileUri: string;
 
     /**
      * The (1-based) line number of the result.
@@ -82,8 +87,8 @@ export namespace SearchInWorkspaceResult {
      * and then length.
      */
     export function compare(a: SearchInWorkspaceResult, b: SearchInWorkspaceResult) {
-        if (a.file !== b.file) {
-            return a.file < b.file ? -1 : 1;
+        if (a.fileUri !== b.fileUri) {
+            return a.fileUri < b.fileUri ? -1 : 1;
         }
 
         if (a.line !== b.line) {
@@ -114,9 +119,9 @@ export interface SearchInWorkspaceClient {
 export const SearchInWorkspaceServer = Symbol('SearchInWorkspaceServer');
 export interface SearchInWorkspaceServer extends JsonRpcServer<SearchInWorkspaceClient> {
     /**
-     * Start a search for WHAT in directory ROOT.  Return a unique search id.
+     * Start a search for WHAT in directories ROOTURIS.  Return a unique search id.
      */
-    search(what: string, rootUri: string, opts?: SearchInWorkspaceOptions): Promise<number>;
+    search(what: string, rootUris: string[], opts?: SearchInWorkspaceOptions): Promise<number>;
 
     /**
      * Cancel an ongoing search.

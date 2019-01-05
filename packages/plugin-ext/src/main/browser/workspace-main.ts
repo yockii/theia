@@ -16,25 +16,28 @@
 
 import * as theia from '@theia/plugin';
 import { interfaces, injectable } from 'inversify';
-import { WorkspaceExt, MAIN_RPC_CONTEXT, WorkspaceMain, WorkspaceFolderPickOptionsMain } from '../../api/plugin-api';
+import { WorkspaceExt, StorageExt, MAIN_RPC_CONTEXT, WorkspaceMain, WorkspaceFolderPickOptionsMain } from '../../api/plugin-api';
 import { RPCProtocol } from '../../api/rpc-protocol';
-import { WorkspaceService } from '@theia/workspace/lib/browser';
 import Uri from 'vscode-uri';
 import { UriComponents } from '../../common/uri-components';
-import { Path } from '@theia/core/lib/common/path';
 import { QuickOpenModel, QuickOpenItem, QuickOpenMode } from '@theia/core/lib/browser/quick-open/quick-open-model';
 import { MonacoQuickOpenService } from '@theia/monaco/lib/browser/monaco-quick-open-service';
 import { FileStat } from '@theia/filesystem/lib/common';
 import { FileSearchService } from '@theia/file-search/lib/common/file-search-service';
 import URI from '@theia/core/lib/common/uri';
+import { WorkspaceService } from '@theia/workspace/lib/browser';
 import { Resource } from '@theia/core/lib/common/resource';
 import { Emitter, Event, Disposable, ResourceResolver } from '@theia/core';
 import { FileWatcherSubscriberOptions } from '../../api/model';
 import { InPluginFileSystemWatcherManager } from './in-plugin-filesystem-watcher-manager';
+import { StoragePathService } from './storage-path-service';
+import { PluginServer } from '../../common/plugin-protocol';
 
 export class WorkspaceMainImpl implements WorkspaceMain {
 
     private proxy: WorkspaceExt;
+
+    private storageProxy: StorageExt;
 
     private quickOpenService: MonacoQuickOpenService;
 
@@ -46,43 +49,53 @@ export class WorkspaceMainImpl implements WorkspaceMain {
 
     private resourceResolver: TextContentResourceResolver;
 
+    private pluginServer: PluginServer;
+
+    private workspaceService: WorkspaceService;
+
+    private storagePathService: StoragePathService;
+
     constructor(rpc: RPCProtocol, container: interfaces.Container) {
         this.proxy = rpc.getProxy(MAIN_RPC_CONTEXT.WORKSPACE_EXT);
+        this.storageProxy = rpc.getProxy(MAIN_RPC_CONTEXT.STORAGE_EXT);
         this.quickOpenService = container.get(MonacoQuickOpenService);
-        const workspaceService = container.get(WorkspaceService);
         this.fileSearchService = container.get(FileSearchService);
         this.resourceResolver = container.get(TextContentResourceResolver);
+        this.pluginServer = container.get(PluginServer);
+        this.workspaceService = container.get(WorkspaceService);
+        this.storagePathService = container.get(StoragePathService);
 
         this.inPluginFileSystemWatcherManager = new InPluginFileSystemWatcherManager(this.proxy, container);
 
-        workspaceService.roots.then(roots => {
-            this.roots = roots;
-            this.notifyWorkspaceFoldersChanged();
+        this.workspaceService.roots.then(roots => {
+            this.processWorkspaceFoldersChanged(roots);
+        });
+
+        this.workspaceService.onWorkspaceChanged(roots => {
+            this.processWorkspaceFoldersChanged(roots);
         });
     }
 
-    notifyWorkspaceFoldersChanged(): void {
-        if (this.roots && this.roots.length) {
-            const folders = this.roots.map((root: FileStat, index: number) => {
-                const uri = Uri.parse(root.uri);
-                const path = new Path(uri.path);
-                return {
-                    uri: uri,
-                    name: path.base,
-                    index: index
-                };
-            });
-
-            this.proxy.$onWorkspaceFoldersChanged({
-                added: folders,
-                removed: []
-            });
-        } else {
-            this.proxy.$onWorkspaceFoldersChanged({
-                added: [],
-                removed: []
-            });
+    async processWorkspaceFoldersChanged(roots: FileStat[]): Promise<void> {
+        if (this.isAnyRootChanged(roots) === false) {
+            return;
         }
+        this.roots = roots;
+
+        await this.storagePathService.updateStoragePath(roots);
+
+        const keyValueStorageWorkspacesData = await this.pluginServer.keyValueStorageGetAll(false);
+        this.storageProxy.$updatePluginsWorkspaceData(keyValueStorageWorkspacesData);
+
+        this.proxy.$onWorkspaceFoldersChanged({ roots });
+    }
+
+    private isAnyRootChanged(roots: FileStat[]): boolean {
+        if (!this.roots || this.roots.length !== roots.length) {
+            return true;
+        }
+
+        return this.roots.some((root, index) => root.uri !== roots[index].uri);
     }
 
     $pickWorkspaceFolder(options: WorkspaceFolderPickOptionsMain): Promise<theia.WorkspaceFolder | undefined> {
@@ -142,31 +155,10 @@ export class WorkspaceMainImpl implements WorkspaceMain {
         });
     }
 
-    $startFileSearch(includePattern: string, excludePatternOrDisregardExcludes?: string | false,
+    async $startFileSearch(includePattern: string, excludePatternOrDisregardExcludes?: string | false,
         maxResults?: number, token?: theia.CancellationToken): Promise<UriComponents[]> {
-        const uris: UriComponents[] = new Array();
-        let j = 0;
-        // tslint:disable-next-line:no-any
-        const promises: Promise<any>[] = new Array();
-        for (const root of this.roots) {
-            promises[j++] = this.fileSearchService.find(includePattern, { rootUri: root.uri }).then(value => {
-                const paths: string[] = new Array();
-                let i = 0;
-                value.forEach(item => {
-                    let path: string;
-                    path = root.uri.endsWith('/') ? root.uri + item : root.uri + '/' + item;
-                    paths[i++] = path;
-                });
-                return Promise.resolve(paths);
-            });
-        }
-        return Promise.all(promises).then(value => {
-            let i = 0;
-            value.forEach(path => {
-                uris[i++] = Uri.parse(path);
-            });
-            return Promise.resolve(uris);
-        });
+        const uriStrs = await this.fileSearchService.find(includePattern, { rootUris: this.roots.map(r => r.uri) });
+        return uriStrs.map(uriStr => Uri.parse(uriStr));
     }
 
     $registerFileSystemWatcher(options: FileWatcherSubscriberOptions): Promise<string> {

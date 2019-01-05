@@ -24,6 +24,7 @@ import { HostedPluginSupport } from '../../hosted/browser/hosted-plugin';
 import { HostedPluginWatcher } from '../../hosted/browser/hosted-plugin-watcher';
 import { HostedPluginLogViewer } from '../../hosted/browser/hosted-plugin-log-viewer';
 import { HostedPluginManagerClient } from '../../hosted/browser/hosted-plugin-manager-client';
+import { OpenUriCommandHandler } from './commands';
 import { PluginApiFrontendContribution } from './plugin-frontend-contribution';
 import { HostedPluginServer, hostedServicePath, PluginServer, pluginServerJsonRpcPath } from '../../common/plugin-protocol';
 import { ModalNotification } from './dialogs/modal-notification';
@@ -39,13 +40,26 @@ import { PluginExtDeployCommandService } from './plugin-ext-deploy-command';
 import { TextEditorService, TextEditorServiceImpl } from './text-editor-service';
 import { EditorModelService, EditorModelServiceImpl } from './text-editor-model-service';
 import { UntitledResourceResolver } from './editor/untitled-resource';
+import { ContextKeyService } from './context-key/context-key';
+import { ContextKeyServiceImpl } from './context-key/context-key-service';
 import { MenusContributionPointHandler } from './menus/menus-contribution-handler';
 import { PluginContributionHandler } from './plugin-contribution-handler';
 import { ViewRegistry } from './view/view-registry';
 import { TextContentResourceResolver } from './workspace-main';
 import { MainPluginApiProvider } from '../../common/plugin-ext-api-contribution';
+import { PluginPathsService, pluginPathsServicePath } from '../common/plugin-paths-protocol';
+import { KeybindingsContributionPointHandler } from './keybindings/keybindings-contribution-handler';
+import { LanguageClientProvider } from '@theia/languages/lib/browser/language-client-provider';
+import { LanguageClientProviderImpl } from './language-provider/plugin-language-client-provider';
+import { LanguageClientContributionProviderImpl } from './language-provider/language-client-contribution-provider-impl';
+import { LanguageClientContributionProvider } from './language-provider/language-client-contribution-provider';
+import { StoragePathService } from './storage-path-service';
+import { DebugSessionContributionRegistry } from '@theia/debug/lib/browser/debug-session-contribution';
+import { PluginDebugSessionContributionRegistry } from './debug/plugin-debug-session-contribution-registry';
+import { PluginDebugService } from './debug/plugin-debug-service';
+import { DebugService } from '@theia/debug/lib/common/debug-service';
 
-export default new ContainerModule(bind => {
+export default new ContainerModule((bind, unbind, isBound, rebind) => {
     bindHostedPluginPreferences(bind);
 
     bind(ModalNotification).toSelf().inSingletonScope();
@@ -58,6 +72,7 @@ export default new ContainerModule(bind => {
     bind(FrontendApplicationContribution).to(HostedPluginInformer).inSingletonScope();
     bind(FrontendApplicationContribution).to(HostedPluginController).inSingletonScope();
 
+    bind(OpenUriCommandHandler).toSelf().inSingletonScope();
     bind(PluginApiFrontendContribution).toSelf().inSingletonScope();
     bind(CommandContribution).toService(PluginApiFrontendContribution);
 
@@ -78,6 +93,12 @@ export default new ContainerModule(bind => {
         return connection.createProxy<HostedPluginServer>(hostedServicePath, hostedWatcher.getHostedPluginClient());
     }).inSingletonScope();
 
+    bind(PluginPathsService).toDynamicValue(ctx => {
+        const connection = ctx.container.get(WebSocketConnectionProvider);
+        return connection.createProxy<PluginPathsService>(pluginPathsServicePath);
+    }).inSingletonScope();
+    bind(StoragePathService).toSelf().inSingletonScope();
+
     bindViewContribution(bind, PluginFrontendViewContribution);
 
     bind(PluginWidget).toSelf();
@@ -95,9 +116,23 @@ export default new ContainerModule(bind => {
     bind(ViewRegistry).toSelf().inSingletonScope();
     bind(MenusContributionPointHandler).toSelf().inSingletonScope();
 
+    bind(KeybindingsContributionPointHandler).toSelf().inSingletonScope();
+
     bind(PluginContributionHandler).toSelf().inSingletonScope();
 
     bind(TextContentResourceResolver).toSelf().inSingletonScope();
     bind(ResourceResolver).toService(TextContentResourceResolver);
     bindContributionProvider(bind, MainPluginApiProvider);
+
+    bind(LanguageClientContributionProviderImpl).toSelf().inSingletonScope();
+    bind(LanguageClientContributionProvider).toService(LanguageClientContributionProviderImpl);
+    bind(LanguageClientProviderImpl).toSelf().inSingletonScope();
+    rebind(LanguageClientProvider).toService(LanguageClientProviderImpl);
+    bind(ContextKeyService).to(ContextKeyServiceImpl).inSingletonScope();
+
+    bind(PluginDebugService).toSelf().inSingletonScope();
+    rebind(DebugService).toService(PluginDebugService);
+
+    bind(PluginDebugSessionContributionRegistry).toSelf().inSingletonScope();
+    rebind(DebugSessionContributionRegistry).toService(PluginDebugSessionContributionRegistry);
 });

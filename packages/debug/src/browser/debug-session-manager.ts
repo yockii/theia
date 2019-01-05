@@ -16,13 +16,13 @@
 
 // tslint:disable:no-any
 
-import { injectable, inject, named, postConstruct } from 'inversify';
-import { Emitter, Event, ContributionProvider, DisposableCollection, MessageService } from '@theia/core';
+import { injectable, inject, postConstruct } from 'inversify';
+import { Emitter, Event, DisposableCollection, MessageService } from '@theia/core';
 import { LabelProvider } from '@theia/core/lib/browser';
 import { EditorManager } from '@theia/editor/lib/browser';
-import { DebugService, DebugError } from '../common/debug-service';
+import { DebugError, DebugService } from '../common/debug-service';
 import { DebugState, DebugSession } from './debug-session';
-import { DebugSessionContribution, DebugSessionFactory } from './debug-session-contribution';
+import { DebugSessionFactory, DebugSessionContributionRegistry } from './debug-session-contribution';
 import { DebugThread } from './model/debug-thread';
 import { DebugStackFrame } from './model/debug-stack-frame';
 import { DebugBreakpoint } from './model/debug-breakpoint';
@@ -41,10 +41,15 @@ export interface DidChangeBreakpointsEvent {
     uri: URI
 }
 
+export interface DebugSessionCustomEvent {
+    readonly body?: any
+    readonly event: string
+    readonly session: DebugSession
+}
+
 @injectable()
 export class DebugSessionManager {
     protected readonly _sessions = new Map<string, DebugSession>();
-    protected readonly contribs = new Map<string, DebugSessionContribution>();
 
     protected readonly onDidCreateDebugSessionEmitter = new Emitter<DebugSession>();
     readonly onDidCreateDebugSession: Event<DebugSession> = this.onDidCreateDebugSessionEmitter.event;
@@ -61,6 +66,9 @@ export class DebugSessionManager {
     protected readonly onDidDestroyDebugSessionEmitter = new Emitter<DebugSession>();
     readonly onDidDestroyDebugSession: Event<DebugSession> = this.onDidDestroyDebugSessionEmitter.event;
 
+    protected readonly onDidReceiveDebugSessionCustomEventEmitter = new Emitter<DebugSessionCustomEvent>();
+    readonly onDidReceiveDebugSessionCustomEvent: Event<DebugSessionCustomEvent> = this.onDidReceiveDebugSessionCustomEventEmitter.event;
+
     protected readonly onDidChangeBreakpointsEmitter = new Emitter<DidChangeBreakpointsEvent>();
     readonly onDidChangeBreakpoints: Event<DidChangeBreakpointsEvent> = this.onDidChangeBreakpointsEmitter.event;
     protected fireDidChangeBreakpoints(event: DidChangeBreakpointsEvent): void {
@@ -76,11 +84,8 @@ export class DebugSessionManager {
     @inject(DebugSessionFactory)
     protected readonly debugSessionFactory: DebugSessionFactory;
 
-    @inject(ContributionProvider) @named(DebugSessionContribution)
-    protected readonly contributions: ContributionProvider<DebugSessionContribution>;
-
     @inject(DebugService)
-    protected readonly debugService: DebugService;
+    protected readonly debug: DebugService;
 
     @inject(LabelProvider)
     protected readonly labelProvider: LabelProvider;
@@ -94,26 +99,30 @@ export class DebugSessionManager {
     @inject(VariableResolverService)
     protected readonly variableResolver: VariableResolverService;
 
+    @inject(DebugSessionContributionRegistry)
+    protected readonly sessionContributionRegistry: DebugSessionContributionRegistry;
+
     @inject(MessageService)
     protected readonly messageService: MessageService;
 
     @postConstruct()
     protected init(): void {
-        for (const contrib of this.contributions.getContributions()) {
-            this.contribs.set(contrib.debugType, contrib);
-        }
         this.breakpoints.onDidChangeMarkers(uri => this.fireDidChangeBreakpoints({ uri }));
     }
 
-    async start(options: DebugSessionOptions): Promise<DebugSession> {
+    async start(options: DebugSessionOptions): Promise<DebugSession | undefined> {
         try {
             const resolved = await this.resolveConfiguration(options);
-            const sessionId = await this.debugService.create(resolved.configuration);
+            const sessionId = await this.debug.createDebugSession(resolved.configuration);
             return this.doStart(sessionId, resolved);
         } catch (e) {
             if (DebugError.NotFound.is(e)) {
-                this.messageService.error(e.message);
+                this.messageService.error(`The debug session type "${e.data.type}" is not supported.`);
+                return undefined;
             }
+
+            this.messageService.error('There was an error starting the debug session, check the logs for more details.');
+            console.error('Error starting the debug session', e);
             throw e;
         }
     }
@@ -123,7 +132,7 @@ export class DebugSessionManager {
             return options;
         }
         const { workspaceFolderUri } = options;
-        const resolvedConfiguration = await this.debugService.resolveDebugConfiguration(options.configuration, workspaceFolderUri);
+        const resolvedConfiguration = await this.debug.resolveDebugConfiguration(options.configuration, workspaceFolderUri);
         const configuration = await this.variableResolver.resolve(resolvedConfiguration);
         const key = configuration.name + workspaceFolderUri;
         const id = this.configurationIds.has(key) ? this.configurationIds.get(key)! + 1 : 0;
@@ -135,7 +144,7 @@ export class DebugSessionManager {
         };
     }
     protected async doStart(sessionId: string, options: DebugSessionOptions): Promise<DebugSession> {
-        const contrib = this.contribs.get(options.configuration.type);
+        const contrib = this.sessionContributionRegistry.get(options.configuration.type);
         const sessionFactory = contrib ? contrib.debugSessionFactory() : this.debugSessionFactory;
         const session = sessionFactory.get(sessionId, options);
         this._sessions.set(sessionId, session);
@@ -163,6 +172,9 @@ export class DebugSessionManager {
         });
         session.on('exited', () => this.destroy(session.id));
         session.start().then(() => this.onDidStartDebugSessionEmitter.fire(session));
+        session.onDidCustomEvent(({ event, body }) =>
+            this.onDidReceiveDebugSessionCustomEventEmitter.fire({ event, body, session })
+        );
         return session;
     }
 
@@ -171,7 +183,7 @@ export class DebugSessionManager {
     async restart(session: DebugSession | undefined = this.currentSession): Promise<DebugSession | undefined> {
         return session && this.doRestart(session);
     }
-    protected async doRestart(session: DebugSession, restart?: any): Promise<DebugSession> {
+    protected async doRestart(session: DebugSession, restart?: any): Promise<DebugSession | undefined> {
         if (await session.restart()) {
             return session;
         }
@@ -284,7 +296,7 @@ export class DebugSessionManager {
     }
 
     private doDestroy(session: DebugSession): void {
-        this.debugService.stop(session.id);
+        this.debug.terminateDebugSession(session.id);
 
         session.dispose();
         this.remove(session.id);
@@ -310,4 +322,17 @@ export class DebugSessionManager {
         return origin && new DebugBreakpoint(origin, this.labelProvider, this.breakpoints, this.editorManager);
     }
 
+    addBreakpoints(breakpoints: DebugBreakpoint[]): void {
+        breakpoints.forEach(breakpoint => {
+            this.breakpoints.addBreakpoint(breakpoint.uri, breakpoint.line, breakpoint.column);
+            this.fireDidChangeBreakpoints({ uri: breakpoint.uri });
+        });
+    }
+
+    deleteBreakpoints(breakpoints: DebugBreakpoint[]): void {
+        breakpoints.forEach(breakpoint => {
+            this.breakpoints.deleteBreakpoint(breakpoint.uri, breakpoint.line, breakpoint.column);
+            this.fireDidChangeBreakpoints({ uri: breakpoint.uri });
+        });
+    }
 }

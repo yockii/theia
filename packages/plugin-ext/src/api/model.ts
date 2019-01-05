@@ -16,6 +16,8 @@
 
 import * as theia from '@theia/plugin';
 import { UriComponents } from '../common/uri-components';
+import { FileStat } from '@theia/filesystem/lib/common';
+import { SymbolInformation } from 'vscode-languageserver-types';
 
 // Should contains internal Plugin API types
 
@@ -240,6 +242,21 @@ export interface HoverProvider {
     provideHover(model: monaco.editor.ITextModel, position: monaco.Position, token: monaco.CancellationToken): Hover | undefined | Thenable<Hover | undefined>;
 }
 
+export enum DocumentHighlightKind {
+    Text = 0,
+    Read = 1,
+    Write = 2
+}
+
+export interface DocumentHighlight {
+    range: Range;
+    kind?: DocumentHighlightKind;
+}
+
+export interface DocumentHighlightProvider {
+    provideDocumentHighlights(model: monaco.editor.ITextModel, position: monaco.Position, token: monaco.CancellationToken): DocumentHighlight[] | undefined;
+}
+
 export interface FormattingOptions {
     tabSize: number;
     insertSpaces: boolean;
@@ -247,7 +264,7 @@ export interface FormattingOptions {
 
 export interface TextEdit {
     range: Range;
-    text?: string;
+    text: string;
     eol?: monaco.editor.EndOfLineSequence;
 }
 
@@ -382,13 +399,69 @@ export interface DocumentSymbol {
     children?: DocumentSymbol[];
 }
 
-export interface WorkspaceFoldersChangeEvent {
-    added: WorkspaceFolder[];
-    removed: WorkspaceFolder[];
+export interface WorkspaceRootsChangeEvent {
+    roots: FileStat[];
 }
 
 export interface WorkspaceFolder {
     uri: UriComponents;
     name: string;
     index: number;
+}
+
+export interface Breakpoint {
+    readonly enabled: boolean;
+    readonly condition?: string;
+    readonly hitCondition?: string;
+    readonly logMessage?: string;
+    readonly location?: Location;
+    readonly functionName?: string;
+}
+
+export interface WorkspaceSymbolProvider {
+    provideWorkspaceSymbols(params: WorkspaceSymbolParams, token: monaco.CancellationToken): Thenable<SymbolInformation[]>;
+    resolveWorkspaceSymbol(symbol: SymbolInformation, token: monaco.CancellationToken): Thenable<SymbolInformation>
+}
+
+export interface WorkspaceSymbolParams {
+    query: string
+}
+
+export interface FoldingContext {
+}
+
+export interface FoldingRange {
+    start: number;
+    end: number;
+    kind?: FoldingRangeKind;
+}
+
+export class FoldingRangeKind {
+    static readonly Comment = new FoldingRangeKind('comment');
+    static readonly Imports = new FoldingRangeKind('imports');
+    static readonly Region = new FoldingRangeKind('region');
+    public constructor(public value: string) { }
+}
+
+export interface Color {
+    readonly red: number;
+    readonly green: number;
+    readonly blue: number;
+    readonly alpha: number;
+}
+
+export interface ColorPresentation {
+    label: string;
+    textEdit?: TextEdit;
+    additionalTextEdits?: TextEdit[];
+}
+
+export interface ColorInformation {
+    range: Range;
+    color: Color;
+}
+
+export interface DocumentColorProvider {
+    provideDocumentColors(model: monaco.editor.ITextModel): PromiseLike<ColorInformation[]>;
+    provideColorPresentations(model: monaco.editor.ITextModel, colorInfo: ColorInformation): PromiseLike<ColorPresentation[]>;
 }

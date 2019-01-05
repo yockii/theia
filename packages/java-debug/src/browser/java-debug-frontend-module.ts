@@ -1,5 +1,5 @@
 /********************************************************************************
- * Copyright (C) 2017 TypeFox and others.
+ * Copyright (C) 2018 TypeFox and others.
  *
  * This program and the accompanying materials are made available under the
  * terms of the Eclipse Public License v. 2.0 which is available at
@@ -15,18 +15,16 @@
  ********************************************************************************/
 
 import { ContainerModule } from 'inversify';
-import { ConnectionHandler, JsonRpcConnectionHandler, MessageClient, DispatchingMessageClient, messageServicePath } from '@theia/core/lib/common';
+// tslint:disable:no-implicit-dependencies
+import { CommandContribution } from '@theia/core/lib/common';
+import { FrontendApplicationContribution } from '@theia/core/lib/browser';
+// tslint:enable:no-implicit-dependencies
+import { bindJavaDebugPreferences } from './java-debug-preferences';
+import { JavaDebugFrontendContribution } from './java-debug-frontend-contribution';
 
-export default new ContainerModule((bind, unbind, isBound, rebind) => {
-
-    bind(DispatchingMessageClient).toSelf().inSingletonScope();
-    rebind(MessageClient).toService(DispatchingMessageClient);
-    bind(ConnectionHandler).toDynamicValue(ctx =>
-        new JsonRpcConnectionHandler<MessageClient>(messageServicePath, client => {
-            const dispatching = ctx.container.get<DispatchingMessageClient>(DispatchingMessageClient);
-            dispatching.clients.add(client);
-            client.onDidCloseConnection(() => dispatching.clients.delete(client));
-            return dispatching;
-        })
-    ).inSingletonScope();
+export default new ContainerModule(bind => {
+    bindJavaDebugPreferences(bind);
+    bind(JavaDebugFrontendContribution).toSelf().inSingletonScope();
+    bind(CommandContribution).toService(JavaDebugFrontendContribution);
+    bind(FrontendApplicationContribution).toService(JavaDebugFrontendContribution);
 });

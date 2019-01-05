@@ -1,19 +1,20 @@
 {
   "name": "@theia/git",
-  "version": "0.3.17",
+  "version": "0.3.18",
   "description": "Theia - Git Integration",
   "dependencies": {
-    "@theia/core": "^0.3.17",
-    "@theia/editor": "^0.3.17",
-    "@theia/filesystem": "^0.3.17",
-    "@theia/languages": "^0.3.17",
-    "@theia/navigator": "^0.3.17",
-    "@theia/workspace": "^0.3.17",
+    "@theia/core": "^0.3.18",
+    "@theia/editor": "^0.3.18",
+    "@theia/filesystem": "^0.3.18",
+    "@theia/languages": "^0.3.18",
+    "@theia/navigator": "^0.3.18",
+    "@theia/workspace": "^0.3.18",
     "@types/diff": "^3.2.2",
     "@types/fs-extra": "^4.0.2",
     "@types/p-queue": "^2.3.1",
     "diff": "^3.4.0",
     "dugite-extra": "0.1.9",
+    "find-git-exec": "^0.0.1-alpha.2",
     "find-git-repositories": "^0.1.0",
     "fs-extra": "^4.0.2",
     "moment": "^2.21.0",
@@ -32,6 +33,10 @@
     {
       "backend": "lib/node/env/git-env-module",
       "backendElectron": "lib/electron-node/env/electron-git-env-module"
+    },
+    {
+      "backend": "lib/node/init/git-init-module",
+      "backendElectron": "lib/electron-node/init/electron-git-init-module"
     },
     {
       "frontend": "lib/browser/prompt/git-prompt-module",
@@ -64,7 +69,7 @@
     "docs": "theiaext docs"
   },
   "devDependencies": {
-    "@theia/ext-scripts": "^0.3.17",
+    "@theia/ext-scripts": "^0.3.18",
     "upath": "^1.0.2"
   },
   "nyc": {

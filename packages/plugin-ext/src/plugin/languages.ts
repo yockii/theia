@@ -23,7 +23,8 @@ import {
     SerializedOnEnterRule,
     SerializedIndentationRule,
     Position,
-    Selection
+    Selection,
+    RawColorInfo,
 } from '../api/plugin-api';
 import { RPCProtocol } from '../api/rpc-protocol';
 import * as theia from '@theia/plugin';
@@ -40,6 +41,7 @@ import {
     SerializedDocumentFilter,
     SignatureHelp,
     Hover,
+    DocumentHighlight,
     Range,
     SingleEditOperation,
     FormattingOptions,
@@ -49,16 +51,19 @@ import {
     CodeLensSymbol,
     DocumentSymbol,
     ReferenceContext,
-    Location
+    Location,
+    ColorPresentation,
 } from '../api/model';
 import { CompletionAdapter } from './languages/completion';
 import { Diagnostics } from './languages/diagnostics';
 import { SignatureHelpAdapter } from './languages/signature';
 import { HoverAdapter } from './languages/hover';
+import { DocumentHighlightAdapter } from './languages/document-highlight';
 import { DocumentFormattingAdapter } from './languages/document-formatting';
 import { RangeFormattingAdapter } from './languages/range-formatting';
 import { OnTypeFormattingAdapter } from './languages/on-type-formatting';
 import { DefinitionAdapter } from './languages/definition';
+import { ImplementationAdapter } from './languages/implementation';
 import { TypeDefinitionAdapter } from './languages/type-definition';
 import { CodeActionAdapter } from './languages/code-action';
 import { LinkProviderAdapter } from './languages/link-provider';
@@ -66,21 +71,30 @@ import { CodeLensAdapter } from './languages/lens';
 import { CommandRegistryImpl } from './command-registry';
 import { OutlineAdapter } from './languages/outline';
 import { ReferenceAdapter } from './languages/reference';
+import { WorkspaceSymbolAdapter } from './languages/workspace-symbol';
+import { SymbolInformation } from 'vscode-languageserver-types';
+import { FoldingProviderAdapter } from './languages/folding';
+import { ColorProviderAdapter } from './languages/color';
 
 type Adapter = CompletionAdapter |
     SignatureHelpAdapter |
     HoverAdapter |
+    DocumentHighlightAdapter |
     DocumentFormattingAdapter |
     RangeFormattingAdapter |
     OnTypeFormattingAdapter |
     DefinitionAdapter |
+    ImplementationAdapter |
     TypeDefinitionAdapter |
     LinkProviderAdapter |
     CodeLensAdapter |
     CodeActionAdapter |
     OutlineAdapter |
     LinkProviderAdapter |
-    ReferenceAdapter;
+    ReferenceAdapter |
+    WorkspaceSymbolAdapter |
+    FoldingProviderAdapter |
+    ColorProviderAdapter;
 
 export class LanguagesExtImpl implements LanguagesExt {
 
@@ -236,6 +250,18 @@ export class LanguagesExtImpl implements LanguagesExt {
     }
     // ### Diagnostics end
 
+    // ### Implementation provider begin
+    $provideImplementation(handle: number, resource: UriComponents, position: Position): Promise<Definition | DefinitionLink[] | undefined> {
+        return this.withAdapter(handle, ImplementationAdapter, adapter => adapter.provideImplementation(URI.revive(resource), position));
+    }
+
+    registerImplementationProvider(selector: theia.DocumentSelector, provider: theia.ImplementationProvider): theia.Disposable {
+        const callId = this.addNewAdapter(new ImplementationAdapter(provider, this.documents));
+        this.proxy.$registerImplementationProvider(callId, this.transformDocumentSelector(selector));
+        return this.createDisposable(callId);
+    }
+    // ### Implementation provider end
+
     // ### Type Definition provider begin
     $provideTypeDefinition(handle: number, resource: UriComponents, position: Position): Promise<Definition | DefinitionLink[] | undefined> {
         return this.withAdapter(handle, TypeDefinitionAdapter, adapter => adapter.provideTypeDefinition(URI.revive(resource), position));
@@ -259,6 +285,34 @@ export class LanguagesExtImpl implements LanguagesExt {
         return this.withAdapter(handle, HoverAdapter, adapter => adapter.provideHover(URI.revive(resource), position));
     }
     // ### Hover Provider end
+
+    // ### Document Highlight Provider begin
+    registerDocumentHighlightProvider(selector: theia.DocumentSelector, provider: theia.DocumentHighlightProvider): theia.Disposable {
+        const callId = this.addNewAdapter(new DocumentHighlightAdapter(provider, this.documents));
+        this.proxy.$registerDocumentHighlightProvider(callId, this.transformDocumentSelector(selector));
+        return this.createDisposable(callId);
+    }
+
+    $provideDocumentHighlights(handle: number, resource: UriComponents, position: Position): Promise<DocumentHighlight[] | undefined> {
+        return this.withAdapter(handle, DocumentHighlightAdapter, adapter => adapter.provideDocumentHighlights(URI.revive(resource), position));
+    }
+    // ### Document Highlight Provider end
+
+    // ### WorkspaceSymbol Provider begin
+    registerWorkspaceSymbolProvider(provider: theia.WorkspaceSymbolProvider): theia.Disposable {
+        const callId = this.addNewAdapter(new WorkspaceSymbolAdapter(provider));
+        this.proxy.$registerWorkspaceSymbolProvider(callId);
+        return this.createDisposable(callId);
+    }
+
+    $provideWorkspaceSymbols(handle: number, query: string): PromiseLike<SymbolInformation[]> {
+        return this.withAdapter(handle, WorkspaceSymbolAdapter, adapter => adapter.provideWorkspaceSymbols(query));
+    }
+
+    $resolveWorkspaceSymbol(handle: number, symbol: SymbolInformation): PromiseLike<SymbolInformation> {
+        return this.withAdapter(handle, WorkspaceSymbolAdapter, adapter => adapter.resolveWorkspaceSymbol(symbol));
+    }
+    // ### WorkspaceSymbol Provider end
 
     // ### Document Formatting Edit begin
     registerDocumentFormattingEditProvider(selector: theia.DocumentSelector, provider: theia.DocumentFormattingEditProvider): theia.Disposable {
@@ -389,6 +443,37 @@ export class LanguagesExtImpl implements LanguagesExt {
     }
     // ### Document Symbol Provider end
 
+    // ### Color Provider begin
+    registerColorProvider(selector: theia.DocumentSelector, provider: theia.DocumentColorProvider): theia.Disposable {
+        const callId = this.addNewAdapter(new ColorProviderAdapter(this.documents, provider));
+        this.proxy.$registerDocumentColorProvider(callId, this.transformDocumentSelector(selector));
+        return this.createDisposable(callId);
+    }
+
+    $provideDocumentColors(handle: number, resource: UriComponents): Promise<RawColorInfo[]> {
+        return this.withAdapter(handle, ColorProviderAdapter, adapter => adapter.provideColors(URI.revive(resource)));
+    }
+
+    $provideColorPresentations(handle: number, resource: UriComponents, colorInfo: RawColorInfo): Promise<ColorPresentation[]> {
+        return this.withAdapter(handle, ColorProviderAdapter, adapter => adapter.provideColorPresentations(URI.revive(resource), colorInfo));
+    }
+    // ### Color Provider end
+
+    // ### Folding Range Provider begin
+    registerFoldingRangeProvider(selector: theia.DocumentSelector, provider: theia.FoldingRangeProvider): theia.Disposable {
+        const callId = this.addNewAdapter(new FoldingProviderAdapter(provider, this.documents));
+        this.proxy.$registerFoldingRangeProvider(callId, this.transformDocumentSelector(selector));
+        return this.createDisposable(callId);
+    }
+
+    $provideFoldingRange(
+        callId: number,
+        resource: UriComponents,
+        context: theia.FoldingContext
+    ): Promise<monaco.languages.FoldingRange[] | undefined> {
+        return this.withAdapter(callId, FoldingProviderAdapter, adapter => adapter.provideFoldingRanges(URI.revive(resource), context));
+    }
+    // ### Folging Range Provider end
 }
 
 function serializeEnterRules(rules?: theia.OnEnterRule[]): SerializedOnEnterRule[] | undefined {

@@ -498,6 +498,26 @@ theia.languages.registerHoverProvider({scheme: 'file'}, {
 });
 ```
 
+#### Document Highlight provider
+
+It is possible to provide document highlight source for a symbol from within plugin.
+To do this one should register corresponding provider. For example:
+
+```typescript
+const documentsSelector: theia.DocumentSelector = { scheme: 'file', language: 'typescript' };
+const handler: theia.DocumentHighlightProvider = { provideDocumentHighlights: provideDocumentHighlightsHandler };
+
+const disposable = theia.languages.registerDocumentHighlightProvider(documentsSelector, handler);
+
+...
+
+function provideDocumentHighlightsHandler(document: theia.TextDocument, position: theia.Position): theia.ProviderResult<theia.DocumentHighlight[]> {
+    // code here
+}
+```
+
+It is possible to return a few sources, but for most cases only one is enough. Return `undefined` to provide nothing.
+
 #### Definition provider
 
 It is possible to provide definition source for a symbol from within plugin.
@@ -517,6 +537,26 @@ function provideDefinitionHandler(document: theia.TextDocument, position: theia.
 ```
 
 The handler will be invoked each time when a user executes `Go To Definition` command.
+It is possible to return a few sources, but for most cases only one is enough. Return `undefined` to provide nothing.
+
+#### Implementation provider
+
+It is possible to provide implementation source for a symbol from within plugin.
+To do this one should register corresponding provider. For example:
+
+```typescript
+const documentsSelector: theia.DocumentSelector = { scheme: 'file', language: 'typescript' };
+const handler: theia.ImplementationProvider = { provideImplementation: provideImplementationHandler };
+
+const disposable = theia.languages.registerImplementationProvider(documentsSelector, handler);
+
+...
+
+function provideImplementationHandler(document: theia.TextDocument, position: theia.Position): theia.ProviderResult<theia.Definition | theia.DefinitionLink[]> {
+    // code here
+}
+```
+
 It is possible to return a few sources, but for most cases only one is enough. Return `undefined` to provide nothing.
 
 #### Type Definition provider
@@ -539,7 +579,6 @@ function provideTypeDefinitionHandler(document: theia.TextDocument, position: th
 
 The handler will be invoked each time when a user executes `Go To Type Definition` command.
 It is possible to return a few sources, but for most cases only one is enough. Return `undefined` to provide nothing.
-
 
 #### Reference provider
 
@@ -615,6 +654,61 @@ const disposable = theia.languages.registerDocumentSymbolProvider(documentsSelec
 ...
 
 function provideSymbols(document: theia.TextDocument): theia.ProviderResult<theia.SymbolInformation[] | theia.DocumentSymbol[]> {
+    // code here
+}
+```
+
+#### Workspace Symbol Provider
+
+A workspace symbol provider allows you register symbols for the symbol search feature.
+
+resolveWorkspaceSymbol is not needed if all SymbolInformation's returned from
+provideWorkspaceSymbols have a location. Otherwise resolveWorkspaceSymbol is needed
+in order to resolve the location of the SymbolInformation.
+
+Example of workspace symbol provider registration:
+
+```typescript
+theia.languages.registerWorkspaceSymbolProvider({
+    provideWorkspaceSymbols(query: string): theia.SymbolInformation[] {
+        return [new theia.SymbolInformation('my symbol', 4, new theia.Range(new theia.Position(0, 0), new theia.Position(0, 0)), theia.Uri.parse("some_uri_to_file"))];
+    }
+} as theia.WorkspaceSymbolProvider);
+```
+
+In this case resolveWorkspaceSymbol is not needed because we have provided the location for every
+symbol returned from provideWorkspaceSymbols
+
+```typescript
+theia.languages.registerWorkspaceSymbolProvider({
+    provideWorkspaceSymbols(query: string): theia.SymbolInformation[] {
+        return [new theia.SymbolInformation('my symbol', 4, 'my container name', new theia.Location(theia.Uri.parse("some_uri_to_file"), undefined))];
+    },
+    resolveWorkspaceSymbol(symbolInformation: theia.SymbolInformation): theia.SymbolInformation {
+        symbolInformation.location.range = new theia.Range(new theia.Position(0, 0), new theia.Position(0, 0));
+        return symbolInformation;
+    }
+} as theia.WorkspaceSymbolProvider);
+```
+
+resolveWorkspaceSymbol is needed here because we have not provided the location for every
+symbol return from provideWorkspaceSymbol
+
+#### Folding
+
+A folding range provider allows you to add logic to fold and unfold custom regions of source code.
+
+Example of folding range provider registration:
+
+```typescript
+const documentsSelector: theia.DocumentSelector = { scheme: 'file', language: 'typescript' };
+const provider = { provideFoldingRanges: provideRanges };
+
+const disposable = theia.languages.registerFoldingRangeProvider(documentsSelector, provider);
+
+...
+
+function provideRanges(document: theia.TextDocument): theia.ProviderResult<theia.FoldingRange[]> {
     // code here
 }
 ```

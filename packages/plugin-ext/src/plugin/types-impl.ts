@@ -16,10 +16,12 @@
 
 import { illegalArgument } from '../common/errors';
 import * as theia from '@theia/plugin';
+import * as crypto from 'crypto';
 import URI from 'vscode-uri';
 import { relative } from '../common/paths-util';
 import { startsWithIgnoreCase } from '../common/strings';
 import { MarkdownString, isMarkdownString } from './markdown-string';
+import { SymbolKind } from '../api/model';
 
 export class Disposable {
     private disposable: undefined | (() => void);
@@ -771,7 +773,7 @@ export class Location {
     uri: URI;
     range: Range;
 
-    constructor(uri: URI, rangeOrPosition: Range | Position) {
+    constructor(uri: URI, rangeOrPosition: Range | Position | undefined) {
         this.uri = uri;
         if (rangeOrPosition instanceof Range) {
             this.range = rangeOrPosition;
@@ -859,6 +861,26 @@ export class Hover {
             this.contents = [contents];
         }
         this.range = range;
+    }
+}
+
+export enum DocumentHighlightKind {
+    Text = 0,
+    Read = 1,
+    Write = 2
+}
+
+export class DocumentHighlight {
+
+    public range: Range;
+    public kind?: DocumentHighlightKind;
+
+    constructor(
+        range: Range,
+        kind?: DocumentHighlightKind
+    ) {
+        this.range = range;
+        this.kind = kind;
     }
 }
 
@@ -1113,35 +1135,6 @@ export enum TreeItemCollapsibleState {
     Expanded = 2
 }
 
-export enum SymbolKind {
-    File = 0,
-    Module = 1,
-    Namespace = 2,
-    Package = 3,
-    Class = 4,
-    Method = 5,
-    Property = 6,
-    Field = 7,
-    Constructor = 8,
-    Enum = 9,
-    Interface = 10,
-    Function = 11,
-    Variable = 12,
-    Constant = 13,
-    String = 14,
-    Number = 15,
-    Boolean = 16,
-    Array = 17,
-    Object = 18,
-    Key = 19,
-    Null = 20,
-    EnumMember = 21,
-    Struct = 22,
-    Event = 23,
-    Operator = 24,
-    TypeParameter = 25
-}
-
 export class SymbolInformation {
 
     static validate(candidate: SymbolInformation): void {
@@ -1275,4 +1268,520 @@ export enum ProgressLocation {
      * Show progress as notification with an optional cancel button. Supports to show infinite and discrete progress.
      */
     Notification = 15
+}
+
+export class ProcessExecution {
+    private executionProcess: string;
+    private arguments: string[];
+    private executionOptions: theia.ProcessExecutionOptions | undefined;
+
+    constructor(process: string, options?: theia.ProcessExecutionOptions);
+    constructor(process: string, args: string[], options?: theia.ProcessExecutionOptions);
+    constructor(process: string, varg1?: string[] | theia.ProcessExecutionOptions, varg2?: theia.ProcessExecutionOptions) {
+        if (typeof process !== 'string') {
+            throw illegalArgument('process');
+        }
+        this.executionProcess = process;
+        if (varg1 !== undefined) {
+            if (Array.isArray(varg1)) {
+                this.arguments = varg1;
+                this.executionOptions = varg2;
+            } else {
+                this.executionOptions = varg1;
+            }
+        }
+        if (this.arguments === undefined) {
+            this.arguments = [];
+        }
+    }
+
+    get process(): string {
+        return this.executionProcess;
+    }
+
+    set process(value: string) {
+        if (typeof value !== 'string') {
+            throw illegalArgument('process');
+        }
+        this.executionProcess = value;
+    }
+
+    get args(): string[] {
+        return this.arguments;
+    }
+
+    set args(value: string[]) {
+        if (!Array.isArray(value)) {
+            value = [];
+        }
+        this.arguments = value;
+    }
+
+    get options(): theia.ProcessExecutionOptions | undefined {
+        return this.executionOptions;
+    }
+
+    set options(value: theia.ProcessExecutionOptions | undefined) {
+        this.executionOptions = value;
+    }
+
+    public computeId(): string {
+        const hash = crypto.createHash('md5');
+        hash.update('process');
+        if (this.executionProcess !== undefined) {
+            hash.update(this.executionProcess);
+        }
+        if (this.arguments && this.arguments.length > 0) {
+            for (const arg of this.arguments) {
+                hash.update(arg);
+            }
+        }
+        return hash.digest('hex');
+    }
+}
+
+export enum ShellQuoting {
+    Escape = 1,
+    Strong = 2,
+    Weak = 3
+}
+
+export enum TaskPanelKind {
+    Shared = 1,
+    Dedicated = 2,
+    New = 3
+}
+
+export enum TaskRevealKind {
+    Always = 1,
+    Silent = 2,
+    Never = 3
+}
+
+export class ShellExecution {
+    private shellCommandLine: string;
+    private shellCommand: string | theia.ShellQuotedString;
+    private arguments: (string | theia.ShellQuotedString)[];
+    private shellOptions: theia.ShellExecutionOptions | undefined;
+
+    constructor(commandLine: string, options?: theia.ShellExecutionOptions);
+    constructor(command: string | theia.ShellQuotedString, args: (string | theia.ShellQuotedString)[], options?: theia.ShellExecutionOptions);
+
+    constructor(arg0: string | theia.ShellQuotedString, arg1?: theia.ShellExecutionOptions | (string | theia.ShellQuotedString)[], arg2?: theia.ShellExecutionOptions) {
+        if (Array.isArray(arg1) || typeof arg1 === 'string') {
+            if (!arg0) {
+                throw illegalArgument('command can\'t be undefined or null');
+            }
+            if (typeof arg0 !== 'string' && typeof arg0.value !== 'string') {
+                throw illegalArgument('command');
+            }
+            this.shellCommand = arg0;
+            this.arguments = arg1 as (string | theia.ShellQuotedString)[];
+            this.shellOptions = arg2;
+        } else {
+            if (typeof arg0 !== 'string') {
+                throw illegalArgument('commandLine');
+            }
+            this.shellCommandLine = arg0;
+            this.shellOptions = arg1;
+        }
+    }
+
+    get commandLine(): string {
+        return this.shellCommandLine;
+    }
+
+    set commandLine(value: string) {
+        if (typeof value !== 'string') {
+            throw illegalArgument('commandLine');
+        }
+        this.shellCommandLine = value;
+    }
+
+    get command(): string | theia.ShellQuotedString {
+        return this.shellCommand;
+    }
+
+    set command(value: string | theia.ShellQuotedString) {
+        if (typeof value !== 'string' && typeof value.value !== 'string') {
+            throw illegalArgument('command');
+        }
+        this.shellCommand = value;
+    }
+
+    get args(): (string | theia.ShellQuotedString)[] {
+        return this.arguments;
+    }
+
+    set args(value: (string | theia.ShellQuotedString)[]) {
+        this.arguments = value || [];
+    }
+
+    get options(): theia.ShellExecutionOptions | undefined {
+        return this.shellOptions;
+    }
+
+    set options(value: theia.ShellExecutionOptions | undefined) {
+        this.shellOptions = value;
+    }
+
+    public computeId(): string {
+        const hash = crypto.createHash('md5');
+        hash.update('shell');
+        if (this.shellCommandLine !== undefined) {
+            hash.update(this.shellCommandLine);
+        }
+        if (this.shellCommand !== undefined) {
+            hash.update(typeof this.shellCommand === 'string' ? this.shellCommand : this.shellCommand.value);
+        }
+        if (this.arguments && this.arguments.length > 0) {
+            for (const arg of this.arguments) {
+                hash.update(typeof arg === 'string' ? arg : arg.value);
+            }
+        }
+        return hash.digest('hex');
+    }
+}
+
+export class TaskGroup {
+    private groupId: string;
+
+    public static Clean: TaskGroup = new TaskGroup('clean', 'Clean');
+    public static Build: TaskGroup = new TaskGroup('build', 'Build');
+    public static Rebuild: TaskGroup = new TaskGroup('rebuild', 'Rebuild');
+    public static Test: TaskGroup = new TaskGroup('test', 'Test');
+
+    public static from(value: string) {
+        switch (value) {
+            case 'clean':
+                return TaskGroup.Clean;
+            case 'build':
+                return TaskGroup.Build;
+            case 'rebuild':
+                return TaskGroup.Rebuild;
+            case 'test':
+                return TaskGroup.Test;
+            default:
+                return undefined;
+        }
+    }
+
+    constructor(id: string, label: string) {
+        if (typeof id !== 'string') {
+            throw illegalArgument('id');
+        }
+        if (typeof label !== 'string') {
+            throw illegalArgument('name');
+        }
+        this.groupId = id;
+    }
+
+    get id(): string {
+        return this.groupId;
+    }
+}
+
+export enum TaskScope {
+    Global = 1,
+    Workspace = 2
+}
+
+export class Task {
+    private taskDefinition: theia.TaskDefinition | undefined;
+    private taskScope: theia.TaskScope.Global | theia.TaskScope.Workspace | theia.WorkspaceFolder | undefined;
+    private taskName: string;
+    private taskExecution: ProcessExecution | ShellExecution | undefined;
+    private taskProblemMatchers: string[];
+    private hasTaskProblemMatchers: boolean;
+    private isTaskBackground: boolean;
+    private taskSource: string;
+    private taskGroup: TaskGroup | undefined;
+    private taskPresentationOptions: theia.TaskPresentationOptions | undefined;
+
+    constructor(taskDefinition: theia.TaskDefinition,
+        scope: theia.WorkspaceFolder | theia.TaskScope.Global | theia.TaskScope.Workspace,
+        name: string,
+        source: string,
+        execution?: ProcessExecution | ShellExecution,
+        problemMatchers?: string | string[]) {
+
+        this.definition = taskDefinition;
+        this.scope = scope;
+        this.name = name;
+        this.source = source;
+        this.execution = execution;
+
+        if (typeof problemMatchers === 'string') {
+            this.taskProblemMatchers = [problemMatchers];
+            this.hasTaskProblemMatchers = true;
+        } else if (Array.isArray(problemMatchers)) {
+            this.taskProblemMatchers = problemMatchers;
+            this.hasTaskProblemMatchers = true;
+        } else {
+            this.taskProblemMatchers = [];
+            this.hasTaskProblemMatchers = false;
+        }
+        this.isTaskBackground = false;
+    }
+
+    get definition(): theia.TaskDefinition | undefined {
+        return this.taskDefinition;
+    }
+
+    set definition(value: theia.TaskDefinition | undefined) {
+        if (value === undefined || value === null) {
+            throw illegalArgument('Kind can\'t be undefined or null');
+        }
+        this.clear();
+        this.taskDefinition = value;
+    }
+
+    get scope(): theia.TaskScope.Global | theia.TaskScope.Workspace | theia.WorkspaceFolder | undefined {
+        return this.taskScope;
+    }
+
+    set scope(value: theia.TaskScope.Global | theia.TaskScope.Workspace | theia.WorkspaceFolder | undefined) {
+        this.clear();
+        this.taskScope = value;
+    }
+
+    get name(): string {
+        return this.taskName;
+    }
+
+    set name(value: string) {
+        if (typeof value !== 'string') {
+            throw illegalArgument('name');
+        }
+        this.clear();
+        this.taskName = value;
+    }
+
+    get execution(): ProcessExecution | ShellExecution | undefined {
+        return this.taskExecution;
+    }
+
+    set execution(value: ProcessExecution | ShellExecution | undefined) {
+        if (value === null) {
+            value = undefined;
+        }
+        this.clear();
+        this.taskExecution = value;
+    }
+
+    get problemMatchers(): string[] {
+        return this.taskProblemMatchers;
+    }
+
+    set problemMatchers(value: string[]) {
+        if (!Array.isArray(value)) {
+            this.taskProblemMatchers = [];
+            this.hasTaskProblemMatchers = false;
+            return;
+        }
+        this.clear();
+        this.taskProblemMatchers = value;
+        this.hasTaskProblemMatchers = true;
+    }
+
+    get hasProblemMatchers(): boolean {
+        return this.hasTaskProblemMatchers;
+    }
+
+    get isBackground(): boolean {
+        return this.isTaskBackground;
+    }
+
+    set isBackground(value: boolean) {
+        if (value !== true && value !== false) {
+            value = false;
+        }
+        this.clear();
+        this.isTaskBackground = value;
+    }
+
+    get source(): string {
+        return this.taskSource;
+    }
+
+    set source(value: string) {
+        if (typeof value !== 'string' || value.length === 0) {
+            throw illegalArgument('source must be a string of length > 0');
+        }
+        this.clear();
+        this.taskSource = value;
+    }
+
+    get group(): TaskGroup | undefined {
+        return this.taskGroup;
+    }
+
+    set group(value: TaskGroup | undefined) {
+        if (value === undefined || value === null) {
+            this.taskGroup = undefined;
+            return;
+        }
+        this.clear();
+        this.taskGroup = value;
+    }
+
+    get presentationOptions(): theia.TaskPresentationOptions | undefined {
+        return this.taskPresentationOptions;
+    }
+
+    set presentationOptions(value: theia.TaskPresentationOptions | undefined) {
+        if (value === null) {
+            value = undefined;
+        }
+        this.clear();
+        this.taskPresentationOptions = value;
+    }
+
+    private clear(): void {
+        this.taskScope = undefined;
+        this.taskDefinition = undefined;
+        if (this.taskExecution instanceof ProcessExecution) {
+            this.taskDefinition = {
+                type: 'process',
+                id: this.taskExecution.computeId()
+            };
+        } else if (this.taskExecution instanceof ShellExecution) {
+            this.taskDefinition = {
+                type: 'shell',
+                id: this.taskExecution.computeId()
+            };
+        }
+    }
+}
+
+/**
+ * The base class of all breakpoint types.
+ */
+export class Breakpoint {
+    /**
+     * Is breakpoint enabled.
+     */
+    enabled: boolean;
+    /**
+     * An optional expression for conditional breakpoints.
+     */
+    condition?: string;
+    /**
+     * An optional expression that controls how many hits of the breakpoint are ignored.
+     */
+    hitCondition?: string;
+    /**
+     * An optional message that gets logged when this breakpoint is hit. Embedded expressions within {} are interpolated by the debug adapter.
+     */
+    logMessage?: string;
+
+    protected constructor(enabled?: boolean, condition?: string, hitCondition?: string, logMessage?: string) {
+        this.enabled = enabled || false;
+        this.condition = condition;
+        this.hitCondition = hitCondition;
+        this.logMessage = logMessage;
+    }
+}
+
+/**
+ * A breakpoint specified by a source location.
+ */
+export class SourceBreakpoint extends Breakpoint {
+    /**
+     * The source and line position of this breakpoint.
+     */
+    location: Location;
+
+    /**
+     * Create a new breakpoint for a source location.
+     */
+    constructor(location: Location, enabled?: boolean, condition?: string, hitCondition?: string, logMessage?: string) {
+        super(enabled, condition, hitCondition, logMessage);
+        this.location = location;
+    }
+}
+
+/**
+ * A breakpoint specified by a function name.
+ */
+export class FunctionBreakpoint extends Breakpoint {
+    /**
+     * The name of the function to which this breakpoint is attached.
+     */
+    functionName: string;
+
+    /**
+     * Create a new function breakpoint.
+     */
+    constructor(functionName: string, enabled?: boolean, condition?: string, hitCondition?: string, logMessage?: string) {
+        super(enabled, condition, hitCondition, logMessage);
+        this.functionName = functionName;
+    }
+}
+
+export class Color {
+    readonly red: number;
+    readonly green: number;
+    readonly blue: number;
+    readonly alpha: number;
+
+    constructor(red: number, green: number, blue: number, alpha: number) {
+        this.red = red;
+        this.green = green;
+        this.blue = blue;
+        this.alpha = alpha;
+    }
+}
+
+export class ColorInformation {
+    range: Range;
+    color: Color;
+
+    constructor(range: Range, color: Color) {
+        if (color && !(color instanceof Color)) {
+            throw illegalArgument('color');
+        }
+        if (!Range.isRange(range)) {
+            throw illegalArgument('range');
+        }
+        this.range = range;
+        this.color = color;
+    }
+}
+
+export class ColorPresentation {
+    label: string;
+    textEdit?: TextEdit;
+    additionalTextEdits?: TextEdit[];
+
+    constructor(label: string) {
+        if (!label || typeof label !== 'string') {
+            throw illegalArgument('label');
+        }
+        this.label = label;
+    }
+}
+
+export enum ColorFormat {
+    RGB = 0,
+    HEX = 1,
+    HSL = 2
+}
+
+export class FoldingRange {
+    start: number;
+    end: number;
+    kind?: FoldingRangeKind;
+
+    constructor(start: number, end: number, kind?: FoldingRangeKind) {
+        this.start = start;
+        this.end = end;
+        this.kind = kind;
+    }
+}
+
+export enum FoldingRangeKind {
+    Comment = 1,
+    Imports = 2,
+    Region = 3
 }

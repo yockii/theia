@@ -14,12 +14,14 @@
  * SPDX-License-Identifier: EPL-2.0 OR GPL-2.0 WITH Classpath-exception-2.0
  ********************************************************************************/
 
-import { SearchInWorkspaceServer, SearchInWorkspaceOptions, SearchInWorkspaceResult, SearchInWorkspaceClient } from '../common/search-in-workspace-interface';
 import { ILogger } from '@theia/core';
-import { inject, injectable } from 'inversify';
 import { RawProcess, RawProcessFactory, RawProcessOptions } from '@theia/process/lib/node';
-import { rgPath } from 'vscode-ripgrep';
 import { FileUri } from '@theia/core/lib/node/file-uri';
+import URI from '@theia/core/lib/common/uri';
+import { inject, injectable } from 'inversify';
+import { SearchInWorkspaceServer, SearchInWorkspaceOptions, SearchInWorkspaceResult, SearchInWorkspaceClient } from '../common/search-in-workspace-interface';
+
+export const RgPath = Symbol('RgPath');
 
 /**
  * Typing for ripgrep's arbitrary data object:
@@ -67,6 +69,9 @@ export class RipgrepSearchInWorkspaceServer implements SearchInWorkspaceServer {
 
     private client: SearchInWorkspaceClient | undefined;
 
+    @inject(RgPath)
+    protected readonly rgPath: string;
+
     constructor(
         @inject(ILogger) protected readonly logger: ILogger,
         @inject(RawProcessFactory) protected readonly rawProcessFactory: RawProcessFactory,
@@ -105,8 +110,8 @@ export class RipgrepSearchInWorkspaceServer implements SearchInWorkspaceServer {
         return args;
     }
 
-    // Search for the string WHAT in directory ROOT.  Return the assigned search id.
-    search(what: string, rootUri: string, opts?: SearchInWorkspaceOptions): Promise<number> {
+    // Search for the string WHAT in directories ROOTURIS.  Return the assigned search id.
+    search(what: string, rootUris: string[], opts?: SearchInWorkspaceOptions): Promise<number> {
         // Start the rg process.  Use --vimgrep to get one result per
         // line, --color=always to get color control characters that
         // we'll use to parse the lines.
@@ -125,8 +130,8 @@ export class RipgrepSearchInWorkspaceServer implements SearchInWorkspaceServer {
         }
 
         const processOptions: RawProcessOptions = {
-            command: rgPath,
-            args: [...args, what, FileUri.fsPath(rootUri)]
+            command: this.rgPath,
+            args: [...args, what].concat(rootUris.map(root => FileUri.fsPath(root)))
         };
         const process: RawProcess = this.rawProcessFactory(processOptions);
         this.ongoingSearches.set(searchId, process);
@@ -176,8 +181,6 @@ export class RipgrepSearchInWorkspaceServer implements SearchInWorkspaceServer {
                 const lineBuf = databuf.slice(0, eolIdx);
                 databuf = databuf.slice(eolIdx + 1);
 
-                // Extract the various fields using the ANSI
-                // control characters for colors as guides.
                 const obj = JSON.parse(lineBuf);
 
                 if (obj['type'] === 'match') {
@@ -197,7 +200,8 @@ export class RipgrepSearchInWorkspaceServer implements SearchInWorkspaceServer {
                         const length = byteRangeLengthToCharacterLength(lineText, character, endByte - startByte);
 
                         const result: SearchInWorkspaceResult = {
-                            file,
+                            fileUri: FileUri.create(file).toString(),
+                            root: this.getRoot(file, rootUris).toString(),
                             line,
                             character: character + 1,
                             length,
@@ -232,6 +236,21 @@ export class RipgrepSearchInWorkspaceServer implements SearchInWorkspaceServer {
         });
 
         return Promise.resolve(searchId);
+    }
+
+    /**
+     * Returns the root folder uri that a file belongs to.
+     * In case that a file belongs to more than one root folders, returns the root folder that is closest to the file.
+     * If the file is not from the current workspace, returns empty string.
+     * @param filePath string path of the file
+     * @param rootUris string URIs of the root folders in the current workspace
+     */
+    private getRoot(filePath: string, rootUris: string[]): URI {
+        const roots = rootUris.filter(root => new URI(root).withScheme('file').isEqualOrParent(FileUri.create(filePath).withScheme('file')));
+        if (roots.length > 0) {
+            return FileUri.create(FileUri.fsPath(roots.sort((r1, r2) => r2.length - r1.length)[0]));
+        }
+        return new URI();
     }
 
     // Cancel an ongoing search.  Trying to cancel a search that doesn't exist isn't an
